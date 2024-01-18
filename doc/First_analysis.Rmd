@@ -1,18 +1,20 @@
 ---
 title: "First analysis"
 author: "Eric Bautista (s212514)"
-date: "`r params$date_param`"
-output: html_document
+date: '`r params$date_param`'
+output:
+  html_document
 params:
   date_param: !r format(Sys.Date(), "%B %d, %Y")
 ---
 
 ### Load required libraries
 
-```{r Libraries}
+```{r Libraries, message=FALSE}
 library(readxl)
 library(tidyverse)
 library(dplyr)
+library(knitr)
 ```
 
 ```{r Functions, include=FALSE}
@@ -28,6 +30,8 @@ sup1_path <- file.path(current_dir, sup1_data)
 
 mm909_data <- "../data/_raw/MM909_data.RData"
 mm909_path <- file.path(current_dir, mm909_data)
+
+provean_path <- "data/provean_output/provean_output"
 ```
 
 ### Read data
@@ -36,15 +40,33 @@ mm909_path <- file.path(current_dir, mm909_data)
 sup1_table <- read_excel(sup1_path, 
                  skip=1, 
                  col_names=TRUE)
-colnames(sup1_table)[1] <- "SampleID"
+colnames(sup1_table)[1] <- "Sample.ID"
 
 load(mm909_path)
 
 # Subset sup1_table
 sup1_subset <- sup1_table %>%
-  select(SampleID, Sample.Timepoint, AJCC.Stage, PFS.Time, 
-                           PFS.Event, OS.Time, OS.Event, Type.of.Lesion, 
-                           Type.of.Primary, RECIST)
+  select(Sample.ID, 
+         Sample.Timepoint, 
+         AJCC.Stage, 
+         PFS.Time, 
+         PFS.Event, 
+         OS.Time, 
+         OS.Event, 
+         Type.of.Lesion, 
+         Type.of.Primary, RECIST)
 
-head(sup1_subset)
+sup1_response <- sup1_subset %>%
+  mutate(Patient.Response = case_when(
+    RECIST %in% c("CR", "PR", "SD") & OS.Time >= 24 ~ "R",
+    RECIST %in% c("SD", "PD") & OS.Time < 24 ~ "NR",
+    TRUE ~ NA_character_  # This line is for any cases that don't match above conditions
+  ))
+
+sup1_final <- sup1_response %>%
+  left_join(response %>% 
+              select(patient, mut_load), 
+            by = c("Sample.ID" = "patient"))
+
+kable(sup1_final)
 ```

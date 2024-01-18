@@ -35,9 +35,27 @@ load(mm909_path)
 
 # Subset sup1_table
 sup1_subset <- sup1_table %>%
-  select(SampleID, Sample.Timepoint, AJCC.Stage, PFS.Time, 
-                           PFS.Event, OS.Time, OS.Event, Type.of.Lesion, 
-                           Type.of.Primary, RECIST)
+  select(Sample.ID, 
+         Sample.Timepoint, 
+         AJCC.Stage, 
+         PFS.Time, 
+         PFS.Event, 
+         OS.Time, 
+         OS.Event, 
+         Type.of.Lesion, 
+         Type.of.Primary, RECIST)
 
-head(sup1_subset)
+sup1_response <- sup1_subset %>%
+  mutate(Patient.Response = case_when(
+    RECIST %in% c("CR", "PR", "SD") & OS.Time >= 24 ~ "R",
+    RECIST %in% c("SD", "PD") & OS.Time < 24 ~ "NR",
+    TRUE ~ NA_character_  # This line is for any cases that don't match above conditions
+  ))
+
+sup1_final <- sup1_response %>%
+  left_join(response %>% 
+              select(patient, mut_load), 
+            by = c("Sample.ID" = "patient"))
+
+head(sup1_final)
 
