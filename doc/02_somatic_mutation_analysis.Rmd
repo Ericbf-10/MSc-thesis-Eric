@@ -1,0 +1,91 @@
+---
+title: "Impact of dysfunctional ubiquitination in response to cancer immunotherapy"
+subtitle: <center> Somatic mutations analysis </center>
+author: "Eric Bautista Farrerons (s212514)"
+date: '`r paste("First created on January 2024. Updated on ", format(Sys.Date(), "%d %B %Y"))`'
+output:
+  html_document:
+    css: style.css
+    code_folding: hide
+    fig_caption: yes
+    toc: yes
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    toc_depth: 4
+    number_sections: true
+---
+
+```{r, message=FALSE}
+### Load required libraries
+library(readxl)
+library(tidyverse)
+library(dplyr)
+library(knitr)
+library(DT)
+library(httr)
+library(jsonlite)
+
+### Load functions
+source(file = "../R/02_functions.R")
+
+### Define paths
+current_dir <- getwd()
+
+# MAF-like file
+maf_data <- "../data/_raw/41467_2017_1460_MOESM6_ESM_somatic_mutations.xlsx"
+maf_path <- file.path(current_dir, maf_data)
+
+### Read data
+maf_table <- read_excel(maf_path,
+skip=1,
+col_names=TRUE)
+```
+
+```{r}
+# List of variants
+variants <- c("ENST00000366667:c.803C>T", "9:g.22125504G>C", "ENST00000003084:c.1431_1433delTTC")
+# Convert the list of variants into JSON
+json_data <- toJSON(list(hgvs_notations = variants))
+# API URL
+url <- "https://rest.ensembl.org/vep/human/hgvs"
+# Set headers for POST request
+headers <- c("Content-Type" = "application/json", "Accept" = "application/json")
+# Send the POST request
+response <- POST(url, body = json_data, add_headers(.headers=headers))
+# Check if the request was successful
+if (status_code(response) == 200) {
+# Parse the JSON response
+results <- content(response, "parsed", simplifyVector = TRUE)
+# Convert results to a data frame or manipulate as needed
+# This step depends on the structure of the results and your specific requirements
+results_df <- as.data.frame(results)
+} else {
+print(paste("Error:", status_code(response)))
+}
+```
+
+## See mutations per patient
+
+```{r}
+unique_tumor_counts <- maf_table %>%
+count(tumor_name, sort = TRUE)  # Count unique values and sort
+
+# Display the result
+datatable(unique_tumor_counts, extensions = 'Buttons', options = list(
+dom = 'Bfrtip',
+buttons = c('copy', 'excel', 'csv'),
+scrollX=TRUE,
+pageLength=10,
+columnDefs = list(list(
+targets = "_all",
+render = JS(
+"function(data, type, row, meta) {",
+"  return data === null ? 'NA' : data;",
+"}"
+)
+))
+),
+caption = "Mutation counts per patient"
+)
+```

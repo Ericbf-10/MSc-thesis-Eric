@@ -13,3 +13,15 @@ if (!require("tidyverse")) {
 if (!require("dplyr")) {
   install.packages("dplyr")
 }
+if (!require("knitr")) {
+  install.packages("knitr")
+}
+if (!require("DT")) {
+  install.packages("DT")
+}
+if (!require("httr")) {
+  install.packages("httr")
+}
+if (!require("jsonlite")) {
+  install.packages("jsonlite")
+}
