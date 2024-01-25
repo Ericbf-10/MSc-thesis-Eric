@@ -34,58 +34,123 @@ current_dir <- getwd()
 
 # MAF-like file
 maf_data <- "../data/_raw/41467_2017_1460_MOESM6_ESM_somatic_mutations.xlsx"
-maf_path <- file.path(current_dir, maf_data)
+maf_path <- file.path(current_dir, 
+                      maf_data)
 
 ### Read data
-maf_table <- read_excel(maf_path,
-skip=1,
-col_names=TRUE)
-```
-
-```{r}
-# List of variants
-variants <- c("ENST00000366667:c.803C>T", "9:g.22125504G>C", "ENST00000003084:c.1431_1433delTTC")
-# Convert the list of variants into JSON
-json_data <- toJSON(list(hgvs_notations = variants))
-# API URL
-url <- "https://rest.ensembl.org/vep/human/hgvs"
-# Set headers for POST request
-headers <- c("Content-Type" = "application/json", "Accept" = "application/json")
-# Send the POST request
-response <- POST(url, body = json_data, add_headers(.headers=headers))
-# Check if the request was successful
-if (status_code(response) == 200) {
-# Parse the JSON response
-results <- content(response, "parsed", simplifyVector = TRUE)
-# Convert results to a data frame or manipulate as needed
-# This step depends on the structure of the results and your specific requirements
-results_df <- as.data.frame(results)
-} else {
-print(paste("Error:", status_code(response)))
-}
+maf_df <- read_excel(maf_path,
+                        skip=1,
+                        col_names=TRUE)
 ```
 
 ## See mutations per patient
 
 ```{r}
-unique_tumor_counts <- maf_table %>%
-count(tumor_name, sort = TRUE)  # Count unique values and sort
+unique_tumor_counts <- maf_df %>%
+  dplyr::count(tumor_name, 
+        sort = TRUE)  # Count unique values and sort
 
 # Display the result
-datatable(unique_tumor_counts, extensions = 'Buttons', options = list(
-dom = 'Bfrtip',
-buttons = c('copy', 'excel', 'csv'),
-scrollX=TRUE,
-pageLength=10,
-columnDefs = list(list(
-targets = "_all",
-render = JS(
-"function(data, type, row, meta) {",
-"  return data === null ? 'NA' : data;",
-"}"
-)
-))
-),
-caption = "Mutation counts per patient"
-)
+datatable(unique_tumor_counts, 
+          extensions = 'Buttons', 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Mutation counts per patient"
+        )
+```
+
+## Pre-processing
+
+```{r, warning=FALSE}
+# Filter rows where Entrez_Gene_Id is 0
+missing_entrez_df <- maf_df %>%
+  filter(Entrez_Gene_Id == 0)
+
+# Filter rows where Hugo_Symbol is Unknown
+missing_hugo_df <- maf_df %>%
+  filter(Hugo_Symbol == 'Unknown')
+
+n_rows_1 <- nrow(missing_entrez_df)
+n_rows_2 <- nrow(missing_hugo_df)
+
+print(paste("Number of samples missing an Entrez ID:", n_rows_1))
+print(paste("Number of samples missing Hugo Symbol:", n_rows_2))
+```
+
+## Export info to use Ensembl VEP (web version)
+
+```{r}
+### Extract info in correct format for VEP input
+api_input <- maf_df %>% 
+  select(Chromosome,
+         Start_position,
+         End_position,
+         ref_allele,
+         alt_allele,
+         Strand) %>% 
+  mutate(Allele_ref_alt = paste(ref_allele, 
+                                alt_allele, 
+                                sep = "/")) %>% 
+  mutate(API_info = paste(Chromosome,
+                          Start_position,
+                          End_position,
+                          Allele_ref_alt,
+                          Strand,
+                          sep = " "))
+
+### Export the info to a file and use the Web VEP
+vep_input_data <- "../data/vep_input_grch37.txt"
+vep_file_path <- file.path(current_dir, 
+                      vep_input_data)
+write.table(api_input$API_info, file = vep_file_path, row.names = FALSE, col.names = FALSE, quote = FALSE)
+```
+
+## Run VEP and explore output
+
+```{r, warning=FALSE}
+### Define path
+vep_out_data <- "../data/vep_output_grch37_01.txt"
+vep_path <- file.path(current_dir,
+                      vep_out_data)
+
+### Read data
+vep_df <- read.csv(vep_path, header = TRUE, sep = "\t")
+
+### Display result
+datatable(vep_df, 
+          extensions = 'Buttons', 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "VEP output"
+        )
+```
+
+## Session Info
+
+```{r}
+sessionInfo()
 ```
