@@ -63,7 +63,7 @@ maf_table <- read_excel(maf_path,
 ### Clean data
 # Subset sup1_table
 sup1_subset <- sup1_table %>%
-  select(Sample.ID,
+  dplyr::select(Sample.ID,
          Sample.Timepoint,
          AJCC.Stage,
          PFS.Time,
@@ -86,7 +86,7 @@ sup1_response <- sup1_subset %>%
 
 sup1_final <- sup1_response %>%
   left_join(response %>%
-            select(patient, mut_load),
+            dplyr::select(patient, mut_load),
             by = c("Sample.ID" = "patient")
   )
 ```
@@ -148,7 +148,7 @@ datatable(rows_with_na,
 ```{r}
 ### Sort IDs from maf_table
 sorted_ids <- maf_table %>%
-  select(tumor_name) %>%
+  dplyr::select(tumor_name) %>%
   distinct(tumor_name) %>%
   arrange(tumor_name)
 
@@ -183,7 +183,7 @@ is_id_present <- sapply(search_ids,
                         function(id) any(str_detect(sorted_ids$tumor_name, id)))
 
 # Combine the IDs and their presence status into a data frame for easy viewing
-patients_present <- data.frame(ID = search_ids, IsPresent = is_id_present)
+patients_present <- data.frame(Sample.ID = search_ids, Is.Present = is_id_present)
 
 # Display the results
 datatable(patients_present, 
@@ -222,6 +222,47 @@ datatable(patients_present,
   - MM909_24
 
   This is because they don't have RNA-Seq data. It is described in the paper.
+  
+## Results table
+
+```{r}
+# Merge the 2 dataframes on "Sample.ID"
+tmp_merge <- left_join(sup1_final, patients_present, by = "Sample.ID")
+
+results_df <- tmp_merge %>%
+  mutate(RNASeq.Data = case_when(
+    Is.Present == TRUE ~ "NO",
+    Is.Present == FALSE | is.na(Is.Present) ~ "YES")
+    ) %>% 
+  mutate(WES.Data = case_when(
+    Is.Present == TRUE | is.na(Is.Present) ~ "YES",
+    Is.Present == FALSE ~ "FAILED")
+    ) %>% 
+  dplyr::select(Sample.ID,
+                Type.of.Primary,
+                RNASeq.Data,
+                WES.Data)
+
+# Display the results
+datatable(results_df, 
+          extensions = 'Buttons', 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Present/missing data per patient"
+        )
+```
   
 ## Session Info
   

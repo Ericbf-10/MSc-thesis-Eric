@@ -85,8 +85,8 @@ missing_hugo_df <- maf_df %>%
 n_rows_1 <- nrow(missing_entrez_df)
 n_rows_2 <- nrow(missing_hugo_df)
 
-print(paste("Number of samples missing an Entrez ID:", n_rows_1))
-print(paste("Number of samples missing Hugo Symbol:", n_rows_2))
+print(paste("Number of genomic regions missing an Entrez ID:", n_rows_1))
+print(paste("Number of genomic regions missing Hugo Symbol:", n_rows_2))
 ```
 
 ## Export info to use Ensembl VEP (web version)
@@ -130,12 +130,14 @@ vep_df <- read.csv(vep_path, header = TRUE, sep = "\t")
 
 ### Display result
 datatable(vep_df, 
-          extensions = 'Buttons', 
+          extensions = c('Buttons',
+                         'fixedColumns'),
           options = list(
             dom = 'Bfrtip',
             buttons = c('copy', 'excel', 'csv'),
             scrollX=TRUE,
             pageLength=10,
+            fixedColumns = list(leftColumns = 2),
             columnDefs = list(list(
               targets = "_all",
               render = JS(
