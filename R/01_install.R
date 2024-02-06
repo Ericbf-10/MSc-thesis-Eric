@@ -29,3 +29,4 @@ if (!requireNamespace("BiocManager", quietly = TRUE)) {
   install.packages("BiocManager")
 }
 BiocManager::install("VariantAnnotation")
+BiocManager::install("biomaRt")

@@ -116,6 +116,32 @@ datatable(sup1_final,
         )
 ```
 
+## Group by response
+
+```{r}
+response_df <- sup1_final %>% 
+  dplyr::count(Patient.Response)
+
+datatable(response_df, 
+          extensions = 'Buttons', 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Patients' grouped by response"
+        )
+```
+
 ## Extract patients' IDs removed from RData object
 
 ```{r}

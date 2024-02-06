@@ -274,7 +274,74 @@ datatable(conseq_df,
         )
 ```
 
+## Get the Hugo Symbols & Ensembl Gene IDs from Entrez IDs
 
+```{r}
+# Connect to the Ensembl BioMart database
+ensembl = biomaRt::useMart(biomart="ENSEMBL_MART_ENSEMBL", 
+                  host="https://grch37.ensembl.org", 
+                  path="/biomart/martservice",
+                  dataset="hsapiens_gene_ensembl")
+
+# Extracting non-NA and non-zero values and ensuring they are unique
+entrez_ids <- unique(na.omit(maf_df$Entrez_Gene_Id[maf_df$Entrez_Gene_Id != 0]))
+
+# Ensure that entrez_ids is a character vector
+entrez_ids <- as.character(entrez_ids)
+
+# Retrieve Hugo symbols & Ensembl gene ids
+reannotated_df <- biomaRt::getBM(attributes = c("entrezgene_id", 
+                                                "hgnc_symbol", 
+                                                "ensembl_gene_id"),
+                   filters = "entrezgene_id",
+                   values = entrez_ids,
+                   mart = ensembl)
+
+# Rename columns so that they match maf_df
+# reannotated_df <- reannotated_df %>%
+#   dplyr::rename(
+#     Entrez_Gene_Id = entrezgene_id,
+#     Ensembl_Gene_Id = ensembl_gene_id
+#   )
+
+# Left join reannotated_df with maf_df
+maf_df_updated <- maf_df %>%
+  left_join(reannotated_df, by = c("Entrez_Gene_Id" = "entrezgene_id"))
+
+# View the updated dataframe
+DT::datatable(maf_df_updated, 
+          extensions = c('Buttons'),
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "MAF_df reannotated"
+        )
+```
+
+```{r}
+# Count the number of unique values in the ensembl_gene_id column
+num_unique_values <- reannotated_df %>% 
+  summarise(unique_count = n_distinct(entrezgene_id)) %>% 
+  pull(unique_count)
+
+# Print the number of unique values
+print(paste("Number of unique Entrez Gene IDs in reannotated_df:", num_unique_values))
+
+# Search for a particular Entrez_Gene_Id
+reannotated_df %>% 
+  filter(entrezgene_id == "100526835")
+```
 
 ## Session Info
 

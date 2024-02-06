@@ -41,13 +41,18 @@ maf_path <- file.path(current_dir,
 maf_df <- read_excel(maf_path,
                         skip=1,
                         col_names=TRUE)
+
+### Add a sample ID column
+maf_df <- maf_df %>%
+  mutate(sample_id = sub("_[12]$", "", tumor_name)) %>% 
+  dplyr::select(sample_id, everything())
 ```
 
 ## See mutations per patient
 
 ```{r}
 unique_tumor_counts <- maf_df %>%
-  dplyr::count(tumor_name, 
+  dplyr::count(sample_id, 
         sort = TRUE)  # Count unique values and sort
 
 # Display the result
@@ -71,7 +76,7 @@ datatable(unique_tumor_counts,
         )
 ```
 
-## Pre-processing
+## Exploration
 
 ```{r, warning=FALSE}
 # Filter rows where Entrez_Gene_Id is 0
@@ -87,23 +92,43 @@ n_rows_2 <- nrow(missing_hugo_df)
 
 print(paste("Number of genomic regions missing an Entrez ID:", n_rows_1))
 print(paste("Number of genomic regions missing Hugo Symbol:", n_rows_2))
+
+# How many different types of mutations has the dataset?
+unique_values <- unique(maf_df$Variant_Classification)
+print(unique_values)
+```
+
+## Get a list of mutations for each patient
+
+```{r}
+# Splitting the dataframe into a list based on Sample.ID
+list_of_all_mutations <- split(maf_df, maf_df$sample_id)
+```
+
+## Get a list of Nonsynonymous mutations per patient
+
+```{r}
+nonsyn_maf_df <- maf_df %>%
+  filter(Variant_Classification %in% c("Missense_Mutation", "Nonsense_Mutation", "Nonstop_Mutation", "Splice_Site"))
+
+list_of_nonsyn_mutations <- split(nonsyn_maf_df, nonsyn_maf_df$sample_id)
 ```
 
 ## Export info to use Ensembl VEP (web version)
 
 ```{r}
-### Extract info in correct format for VEP input
-api_input <- maf_df %>% 
-  select(Chromosome,
+### Extract nonsyn info in correct format for VEP input
+api_input <- nonsyn_maf_df %>% 
+  dplyr::select(Chromosome,
          Start_position,
          End_position,
          ref_allele,
          alt_allele,
          Strand) %>% 
-  mutate(Allele_ref_alt = paste(ref_allele, 
+  dplyr::mutate(Allele_ref_alt = paste(ref_allele, 
                                 alt_allele, 
                                 sep = "/")) %>% 
-  mutate(API_info = paste(Chromosome,
+  dplyr::mutate(API_info = paste(Chromosome,
                           Start_position,
                           End_position,
                           Allele_ref_alt,
@@ -111,7 +136,7 @@ api_input <- maf_df %>%
                           sep = " "))
 
 ### Export the info to a file and use the Web VEP
-vep_input_data <- "../data/vep_input_grch37.txt"
+vep_input_data <- "../data/vep_input_nonsyn_grch37.txt"
 vep_file_path <- file.path(current_dir, 
                       vep_input_data)
 write.table(api_input$API_info, file = vep_file_path, row.names = FALSE, col.names = FALSE, quote = FALSE)
@@ -121,34 +146,41 @@ write.table(api_input$API_info, file = vep_file_path, row.names = FALSE, col.nam
 
 ```{r, warning=FALSE}
 ### Define path
-vep_out_data <- "../data/vep_output_grch37_01.txt"
+vep_out_data <- "../data/vep_output_grch37_02.txt"
 vep_path <- file.path(current_dir,
                       vep_out_data)
 
 ### Read data
 vep_df <- read.csv(vep_path, header = TRUE, sep = "\t")
-
+head(vep_df)
 ### Display result
-datatable(vep_df, 
-          extensions = c('Buttons',
-                         'fixedColumns'),
-          options = list(
-            dom = 'Bfrtip',
-            buttons = c('copy', 'excel', 'csv'),
-            scrollX=TRUE,
-            pageLength=10,
-            fixedColumns = list(leftColumns = 2),
-            columnDefs = list(list(
-              targets = "_all",
-              render = JS(
-                "function(data, type, row, meta) {",
-                "  return data === null ? 'NA' : data;",
-                "}"
-              )
-            ))
-          ),
-          caption = "VEP output"
-        )
+# datatable(vep_df,
+#           extensions = c('Buttons'),
+#           options = list(
+#             dom = 'Bfrtip',
+#             buttons = c('copy', 'excel', 'csv'),
+#             scrollX=TRUE,
+#             pageLength=10,
+#             columnDefs = list(list(
+#               targets = "_all",
+#               render = JS(
+#                 "function(data, type, row, meta) {",
+#                 "  return data === null ? 'NA' : data;",
+#                 "}"
+#               )
+#     ))
+#   ),
+#   caption = "VEP output"
+# )
+```
+
+## Filter LoF mutations
+
+```{r}
+lof_vep_df <- vep_df %>%
+  filter(Variant_Classification %in% c("Missense_Mutation", "Nonsense_Mutation", "Nonstop_Mutation", "Splice_Site"))
+
+list_of_lof_mutations <- split(lof_vep_df, lof_vep_df$sample_id)
 ```
 
 ## Session Info
