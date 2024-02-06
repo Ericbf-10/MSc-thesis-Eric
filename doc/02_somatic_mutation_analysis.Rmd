@@ -25,6 +25,7 @@ library(knitr)
 library(DT)
 library(httr)
 library(jsonlite)
+library(stringr)
 
 ### Load functions
 source(file = "../R/02_functions.R")
@@ -45,7 +46,8 @@ maf_df <- read_excel(maf_path,
 ### Add a sample ID column
 maf_df <- maf_df %>%
   mutate(sample_id = sub("_[12]$", "", tumor_name)) %>% 
-  dplyr::select(sample_id, everything())
+  dplyr::select(sample_id, everything()) %>% 
+  arrange(sample_id)
 ```
 
 ## See mutations per patient
@@ -95,7 +97,11 @@ print(paste("Number of genomic regions missing Hugo Symbol:", n_rows_2))
 
 # How many different types of mutations has the dataset?
 unique_values <- unique(maf_df$Variant_Classification)
-print(unique_values)
+print(paste("The mutation categories in the data:", toString(unique_values)))
+
+# For selected nonsynonymous mutations based on literature
+selected_mutations <- c(unique_values[1], unique_values[3], unique_values[7], unique_values[10], unique_values[12])
+print(paste("The mutation categories I will use as Nonsynonymous based on literature:", toString(selected_mutations)))
 ```
 
 ## Get a list of mutations for each patient
@@ -109,7 +115,8 @@ list_of_all_mutations <- split(maf_df, maf_df$sample_id)
 
 ```{r}
 nonsyn_maf_df <- maf_df %>%
-  filter(Variant_Classification %in% c("Missense_Mutation", "Nonsense_Mutation", "Nonstop_Mutation", "Splice_Site"))
+  filter(Variant_Classification %in% c("Missense_Mutation", "Nonsense_Mutation", "Nonstop_Mutation", "Start_Codon_SNP", "Splice_Site")) %>% 
+  arrange(sample_id)
 
 list_of_nonsyn_mutations <- split(nonsyn_maf_df, nonsyn_maf_df$sample_id)
 ```
@@ -124,7 +131,8 @@ api_input <- nonsyn_maf_df %>%
          End_position,
          ref_allele,
          alt_allele,
-         Strand) %>% 
+         Strand,
+         sample_id) %>% 
   dplyr::mutate(Allele_ref_alt = paste(ref_allele, 
                                 alt_allele, 
                                 sep = "/")) %>% 
@@ -133,6 +141,7 @@ api_input <- nonsyn_maf_df %>%
                           End_position,
                           Allele_ref_alt,
                           Strand,
+                          sample_id,
                           sep = " "))
 
 ### Export the info to a file and use the Web VEP
@@ -146,39 +155,31 @@ write.table(api_input$API_info, file = vep_file_path, row.names = FALSE, col.nam
 
 ```{r, warning=FALSE}
 ### Define path
-vep_out_data <- "../data/vep_output_grch37_02.txt"
+vep_out_data <- "../data/vep_output_nonsyn_grch37_03.txt"
 vep_path <- file.path(current_dir,
                       vep_out_data)
 
 ### Read data
 vep_df <- read.csv(vep_path, header = TRUE, sep = "\t")
-head(vep_df)
-### Display result
-# datatable(vep_df,
-#           extensions = c('Buttons'),
-#           options = list(
-#             dom = 'Bfrtip',
-#             buttons = c('copy', 'excel', 'csv'),
-#             scrollX=TRUE,
-#             pageLength=10,
-#             columnDefs = list(list(
-#               targets = "_all",
-#               render = JS(
-#                 "function(data, type, row, meta) {",
-#                 "  return data === null ? 'NA' : data;",
-#                 "}"
-#               )
-#     ))
-#   ),
-#   caption = "VEP output"
-# )
+
+### Clean and wrangle
+vep_df_clean <- vep_df %>% 
+  mutate(across(everything(), ~na_if(., "-"))) %>% 
+  select(where(~any(!is.na(.)))) %>% 
+  rename(sample_id = X.Uploaded_variation)
+
+print(paste("The columns that do not have any information are:", toString(setdiff(colnames(vep_df), colnames(vep_df_clean)))))
 ```
 
-## Filter LoF mutations
+## Get a list of LoF mutations per patient
 
 ```{r}
-lof_vep_df <- vep_df %>%
-  filter(Variant_Classification %in% c("Missense_Mutation", "Nonsense_Mutation", "Nonstop_Mutation", "Splice_Site"))
+lof_vep_df <- vep_df_clean %>%
+  mutate(SIFT_cleaned = str_extract(SIFT, "^[^(]+"), 
+         PolyPhen_cleaned = str_extract(PolyPhen, "^[^(]+")) %>%
+  filter(SIFT_cleaned %in% c("deleterious", "deleterious_low_confidence") | 
+         PolyPhen_cleaned %in% c("probably_damaging", "possibly_damaging")) %>% 
+  arrange(sample_id)
 
 list_of_lof_mutations <- split(lof_vep_df, lof_vep_df$sample_id)
 ```

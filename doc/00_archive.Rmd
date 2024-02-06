@@ -343,6 +343,14 @@ reannotated_df %>%
   filter(entrezgene_id == "100526835")
 ```
 
+## DEBUG: explore unique values in columns
+
+```{r}
+vep_df_clean %>% 
+  dplyr::count(MPC) %>%  
+  arrange(desc(n))
+```
+
 ## Session Info
 
 ```{r}

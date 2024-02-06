@@ -25,6 +25,9 @@ if (!require("httr")) {
 if (!require("jsonlite")) {
   install.packages("jsonlite")
 }
+if (!require("stringr")) {
+  install.packages("stringr")
+}
 if (!requireNamespace("BiocManager", quietly = TRUE)) {
   install.packages("BiocManager")
 }
