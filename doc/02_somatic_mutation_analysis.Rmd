@@ -50,34 +50,6 @@ maf_df <- maf_df %>%
   arrange(sample_id)
 ```
 
-## See mutations per patient
-
-```{r}
-unique_tumor_counts <- maf_df %>%
-  dplyr::count(sample_id, 
-        sort = TRUE)  # Count unique values and sort
-
-# Display the result
-datatable(unique_tumor_counts, 
-          extensions = 'Buttons', 
-          options = list(
-            dom = 'Bfrtip',
-            buttons = c('copy', 'excel', 'csv'),
-            scrollX=TRUE,
-            pageLength=10,
-            columnDefs = list(list(
-              targets = "_all",
-              render = JS(
-                "function(data, type, row, meta) {",
-                "  return data === null ? 'NA' : data;",
-                "}"
-              )
-            ))
-          ),
-          caption = "Mutation counts per patient"
-        )
-```
-
 ## Exploration
 
 ```{r, warning=FALSE}
@@ -109,6 +81,11 @@ print(paste("The mutation categories I will use as Nonsynonymous based on litera
 ```{r}
 # Splitting the dataframe into a list based on Sample.ID
 list_of_all_mutations <- split(maf_df, maf_df$sample_id)
+
+# Save the maf_df into a file
+maf_out_path <- file.path(current_dir, 
+                      "../data/all_mutations.csv")
+write.csv(maf_df, file = maf_out_path, row.names = TRUE)
 ```
 
 ## Get a list of Nonsynonymous mutations per patient
@@ -119,6 +96,11 @@ nonsyn_maf_df <- maf_df %>%
   arrange(sample_id)
 
 list_of_nonsyn_mutations <- split(nonsyn_maf_df, nonsyn_maf_df$sample_id)
+
+# Save the nonsyn_maf_df into a file
+nonsyn_maf_out_path <- file.path(current_dir, 
+                      "../data/nonsyn_mutations.csv")
+write.csv(nonsyn_maf_df, file = nonsyn_maf_out_path, row.names = TRUE)
 ```
 
 ## Export info to use Ensembl VEP (web version)
@@ -182,6 +164,175 @@ lof_vep_df <- vep_df_clean %>%
   arrange(sample_id)
 
 list_of_lof_mutations <- split(lof_vep_df, lof_vep_df$sample_id)
+
+# Save the lof_vep_df into a file
+lof_vep_out_path <- file.path(current_dir, 
+                      "../data/lof_mutations.csv")
+write.csv(lof_vep_df, file = lof_vep_out_path, row.names = TRUE)
+```
+
+## Calculate TMB per patient
+
+```{r}
+# Step 1: Define the size of the sequenced region (in Mb)
+sequenced_region_size_mb <- 30  # For WES, it's commonly around 30 Mb.
+
+tmb_df <- maf_df %>%
+  group_by(sample_id) %>%
+  summarise(
+    total_mutations = n(),  # Count mutations for each sample
+    TMB = total_mutations / sequenced_region_size_mb  # Calculate TMB
+  ) %>%
+  arrange(desc(TMB))  # Arrange by TMB in descending order
+
+# View the TMB for each sample/patient
+datatable(tmb_df, 
+          extensions = 'Buttons', 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Number of mutations and TMB per patient"
+        )
+```
+
+## Summary bar plot of Nonsynonymous mutations
+
+```{r}
+# Define output path
+nonsyn_plot_path <- file.path(current_dir, 
+                              "../results/nonsyn_plot.png")
+
+# Count the occurrences of each unique value in Variant_Classification
+top_variants <- nonsyn_maf_df %>%
+  count(Variant_Classification, name = "frequency") %>%
+  mutate(true_frequency = frequency / sum(frequency)) %>% 
+  arrange(desc(true_frequency))
+
+# Create a bar plot
+nonsyn_plot <- ggplot(top_variants, aes(x = reorder(Variant_Classification,
+                                                    -true_frequency), 
+                                     y = true_frequency, 
+                                     fill = Variant_Classification)) +
+  geom_bar(stat = "identity") +
+  scale_fill_brewer(palette = "Set1") +  # Use a color palette from RColorBrewer
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", colour = "black"), # Set background to white with grey border
+    panel.grid.major = element_line(color = "grey", linewidth = 0.5),  # Adjust major gridlines
+    panel.grid.minor = element_blank(),  # Hide minor gridlines for a cleaner look
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),  # Tilt x-axis labels
+    plot.background = element_rect(fill = "white", colour = NA)  # Set plot background to white
+  ) +
+  labs(title = "Nonsynonymous mutations' frequency",
+       x = "Variant Classification", 
+       y = "Relative Frequency") +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.1))  # Set y-axis breaks every 0.1
+
+# Print plot
+print(nonsyn_plot)
+
+# Save plot
+ggsave(nonsyn_plot_path, nonsyn_plot, width = 10, height = 8, dpi = 300)
+```
+
+## Summary bar plot of LoF mutations
+
+```{r}
+# Define output path
+lof_plot_path <- file.path(current_dir, 
+                           "../results/lof_plot.png")
+
+# Count the occurrences of each unique value in Consequence and calculate the true frequency
+top_lof_variants <- lof_vep_df %>%
+  count(Consequence, name = "frequency") %>%
+  mutate(true_frequency = frequency / sum(frequency)) %>%
+  arrange(desc(true_frequency)) %>%
+  slice_max(order_by = true_frequency, n = 5)
+
+# Create a bar plot with the true frequency
+lof_plot <- ggplot(top_lof_variants, aes(x = reorder(Consequence, 
+                                                     -true_frequency), 
+                                         y = true_frequency, 
+                                         fill = Consequence)) +
+  geom_bar(stat = "identity") +
+  scale_fill_brewer(palette = "Set1") +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", colour = "black"),
+    panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+    plot.background = element_rect(fill = "white", colour = NA)
+  ) +
+  labs(title = "Top 5 Most Frequent LoF Mutations (Relative Frequency)",
+       x = "Consequence", 
+       y = "Relative Frequency") +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.1))  # Set y-axis breaks every 0.1
+
+# Print plot
+print(lof_plot)
+
+# Save plot
+ggsave(lof_plot_path, lof_plot, width = 10, height = 8, dpi = 300)
+```
+
+## Box plot of TMB grouped by response
+
+```{r}
+# Read sup1_response.csv
+sup1_response_path <- file.path(current_dir, 
+                           "../data/sup1_response.csv")
+sup1_response_df <- read.csv(sup1_response_path)
+
+# Merge with tmb_df
+tmb_response_df <- tmb_df %>% 
+  left_join(sup1_response_df %>% 
+            dplyr::select(Sample.ID, Patient.Response),
+            by = c("sample_id" = "Sample.ID")
+  ) %>% 
+  select(sample_id,
+         TMB,
+         patient_response = Patient.Response)
+
+# Define output path
+tmb_boxplot_path <- file.path(current_dir, 
+                           "../results/tmb_boxplot.png")
+
+# Create a boxplot
+tmb_boxplot <- ggplot(tmb_response_df, aes(x = patient_response, 
+                                           y = TMB, 
+                                           fill = patient_response)) +
+  geom_boxplot() +
+  scale_fill_brewer(palette = "Set1") +
+  scale_x_discrete(labels = c("NR" = "Non-responders", 
+                              "R" = "Responders")) +  # Manually set x-axis labels
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", colour = "black"),
+    panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+    plot.background = element_rect(fill = "white", colour = NA)
+  ) +
+  labs(title = "TMB by Patient Response",
+       x = "Patient Response",
+       y = "Tumor Mutational Burden (TMB)")
+
+# Print plot
+print(tmb_boxplot)
+
+# Save plot
+ggsave(tmb_boxplot_path, tmb_boxplot, width = 10, height = 8, dpi = 300)
 ```
 
 ## Session Info

@@ -89,6 +89,11 @@ sup1_final <- sup1_response %>%
             dplyr::select(patient, mut_load),
             by = c("Sample.ID" = "patient")
   )
+
+# Save the sup1_final into a file
+sup1_out_path <- file.path(current_dir, 
+                      "../data/sup1_response.csv")
+write.csv(sup1_final, file = sup1_out_path, row.names = TRUE)
 ```
 
 ## Patients' characteristics with response to treatment
