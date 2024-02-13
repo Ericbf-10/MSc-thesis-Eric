@@ -1,0 +1,412 @@
+---
+title: "Impact of dysfunctional ubiquitination in response to cancer immunotherapy"
+subtitle: <center> Somatic mutations analysis </center>
+author: "Eric Bautista Farrerons (s212514)"
+date: '`r paste("First created on January 2024. Updated on ", format(Sys.Date(), "%d %B %Y"))`'
+output:
+  html_document:
+    css: style.css
+    code_folding: hide
+    fig_caption: yes
+    toc: yes
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    toc_depth: 4
+    number_sections: true
+---
+
+```{r, message=FALSE}
+### Load required libraries
+library(readxl)
+library(tidyverse)
+library(dplyr)
+library(knitr)
+library(DT)
+library(httr)
+library(jsonlite)
+library(stringr)
+
+### Load functions
+source(file = "../02_functions.R")
+
+### Define paths
+current_dir <- getwd()
+
+# MAF-like file
+maf_data <- "../../data/_raw/41467_2017_1460_MOESM6_ESM_somatic_mutations.xlsx"
+maf_path <- file.path(current_dir, 
+                      maf_data)
+
+### Define variables
+nonsyn_categories <- c("Missense_Mutation", "Nonsense_Mutation", "Nonstop_Mutation", "Start_Codon_SNP", "Splice_Site")
+
+### Read data
+maf_df <- read_excel(maf_path,
+                        skip=1,
+                        col_names=TRUE)
+
+### Add a sample ID column
+maf_df <- maf_df %>%
+  mutate(sample_id = sub("_[12]$", "", tumor_name)) %>% 
+  dplyr::select(sample_id, everything()) %>% 
+  arrange(sample_id)
+```
+
+# Exploration
+
+```{r, warning=FALSE}
+# Filter rows where Entrez_Gene_Id is 0
+missing_entrez_df <- maf_df %>%
+  filter(Entrez_Gene_Id == 0)
+
+# Filter rows where Hugo_Symbol is Unknown
+missing_hugo_df <- maf_df %>%
+  filter(Hugo_Symbol == 'Unknown')
+
+n_rows_1 <- nrow(missing_entrez_df)
+n_rows_2 <- nrow(missing_hugo_df)
+
+# print(paste("Number of genomic regions missing an Entrez ID:", n_rows_1))
+# print(paste("Number of genomic regions missing Hugo Symbol:", n_rows_2))
+
+# How many different types of mutations has the dataset?
+unique_values <- unique(maf_df$Variant_Classification)
+# print(paste("The mutation categories in the data:", toString(unique_values)))
+
+# For selected nonsynonymous mutations based on literature
+selected_nonsyn_mutations <- c(unique_values[1], unique_values[2], unique_values[7], unique_values[10], unique_values[12])
+# print(paste("The mutation categories I will use as Nonsynonymous based on literature:", toString(selected_mutations)))
+```
+
+## Initial considerations
+
+Number of genomic regions **missing an Entrez ID**: `r n_rows_1`
+
+Number of genomic regions **missing Hugo Symbol**: `r n_rows_2`
+
+The **mutation categories** in the data are: `r unique_values`
+
+The mutation categories I will use as **Nonsynonymous** based on literature: `r selected_nonsyn_mutations`
+ 
+# Get a list of mutations for each patient
+
+```{r}
+# Splitting the dataframe into a list based on Sample.ID
+list_of_all_mutations <- split(maf_df, maf_df$sample_id)
+
+# Save the maf_df into a file
+maf_out_path <- file.path(current_dir, 
+                      "../../data/all_mutations.csv")
+write.csv(maf_df, file = maf_out_path, row.names = TRUE)
+```
+
+# Get a list of Nonsynonymous mutations per patient
+
+```{r}
+nonsyn_maf_df <- maf_df %>%
+  filter(Variant_Classification %in% nonsyn_categories) %>% 
+  arrange(sample_id)
+
+list_of_nonsyn_mutations <- split(nonsyn_maf_df, nonsyn_maf_df$sample_id)
+
+# Save the nonsyn_maf_df into a file
+nonsyn_maf_out_path <- file.path(current_dir, 
+                      "../../data/nonsyn_mutations.csv")
+write.csv(nonsyn_maf_df, file = nonsyn_maf_out_path, row.names = TRUE)
+```
+
+# Export info to use Ensembl VEP (web version)
+
+```{r}
+### Extract nonsyn info in correct format for VEP input
+api_input <- nonsyn_maf_df %>% 
+  dplyr::select(Chromosome,
+         Start_position,
+         End_position,
+         ref_allele,
+         alt_allele,
+         Strand,
+         sample_id) %>% 
+  dplyr::mutate(Allele_ref_alt = paste(ref_allele, 
+                                alt_allele, 
+                                sep = "/")) %>% 
+  dplyr::mutate(API_info = paste(Chromosome,
+                          Start_position,
+                          End_position,
+                          Allele_ref_alt,
+                          Strand,
+                          sample_id,
+                          sep = " "))
+
+### Export the info to a file and use the Web VEP
+vep_input_data <- "../../data/vep_input_nonsyn_grch37.txt"
+vep_file_path <- file.path(current_dir, 
+                      vep_input_data)
+write.table(api_input$API_info, file = vep_file_path, row.names = FALSE, col.names = FALSE, quote = FALSE)
+```
+
+# Run VEP and explore output
+
+```{r, warning=FALSE}
+### Define path
+vep_out_data <- "../../data/vep_output_nonsyn_grch37_03.txt"
+vep_path <- file.path(current_dir,
+                      vep_out_data)
+
+### Read data
+vep_df <- read.csv(vep_path, header = TRUE, sep = "\t")
+
+### Clean and wrangle
+vep_df_clean <- vep_df %>% 
+  mutate(across(everything(), ~na_if(., "-"))) %>% 
+  select(where(~any(!is.na(.)))) %>% 
+  rename(sample_id = X.Uploaded_variation) %>% 
+  mutate(
+    SIFT_cleaned = str_extract(SIFT, "^[^(]+"), 
+    PolyPhen_cleaned = str_extract(PolyPhen, "^[^(]+"),
+    Liberal_consequence = case_when(
+      SIFT_cleaned %in% c("deleterious", "deleterious_low_confidence") | 
+      PolyPhen_cleaned %in% c("probably_damaging", "possibly_damaging") ~ "deleterious",
+      TRUE ~ "non-deleterious"
+    )
+  )
+
+# print(paste("The columns that do not have any information are:", toString(setdiff(colnames(vep_df), colnames(vep_df_clean)))))
+```
+
+The columns that **do not have any information** are: `r toString(setdiff(colnames(vep_df), colnames(vep_df_clean)))`
+
+# Get a list of LoF mutations per patient
+
+```{r}
+lof_vep_df <- vep_df_clean %>%
+  filter(Liberal_consequence == "deleterious") %>% 
+  arrange(sample_id)
+
+list_of_lof_mutations <- split(lof_vep_df, lof_vep_df$sample_id)
+
+# Save the lof_vep_df into a file
+lof_vep_out_path <- file.path(current_dir, 
+                      "../../data/lof_mutations.csv")
+write.csv(lof_vep_df, file = lof_vep_out_path, row.names = TRUE)
+```
+
+# Calculate TMB per patient
+
+```{r}
+# Step 1: Define the size of the sequenced region (in Mb)
+sequenced_region_size_mb <- 25840698/1000000 # Taken from Ref: https://bmcresnotes.biomedcentral.com/articles/10.1186/s13104-019-4343-8
+
+# Step 2: Filter for non-synonymous mutations based on literature
+tmb_df <- maf_df %>%
+  filter(Variant_Classification %in% nonsyn_categories) %>% 
+  group_by(sample_id) %>%
+  summarise(
+    total_mutations = n(),  # Count mutations for each sample
+    TMB = total_mutations / sequenced_region_size_mb  # Calculate TMB
+  ) %>%
+  mutate(TMB_class = case_when( # Define TMB class based on literature: 10 mut/Mb = High
+    TMB >= 10 ~ "High",
+    TMB < 10 ~ "Low")
+  ) %>% 
+  arrange(desc(TMB)) # Arrange by TMB in descending order
+
+# View the TMB for each sample/patient
+datatable(tmb_df, 
+          extensions = 'Buttons', 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Number of mutations and (non-synonymous) TMB per patient"
+        )
+```
+
+# Plots
+
+## Summary bar plot of Nonsynonymous mutations
+
+```{r}
+# Define output path
+nonsyn_plot_path <- file.path(current_dir, 
+                              "../../results/nonsyn_plot.png")
+
+# Count the occurrences of each unique value in Variant_Classification
+top_variants <- nonsyn_maf_df %>%
+  count(Variant_Classification, name = "frequency") %>%
+  mutate(true_frequency = frequency / sum(frequency)) %>% 
+  arrange(desc(true_frequency))
+
+# Create a bar plot
+nonsyn_plot <- ggplot(top_variants, aes(x = reorder(Variant_Classification,
+                                                    -true_frequency), 
+                                     y = true_frequency, 
+                                     fill = Variant_Classification)) +
+  geom_bar(stat = "identity") +
+  scale_fill_brewer(palette = "Set1") +  # Use a color palette from RColorBrewer
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", colour = "black"), # Set background to white with grey border
+    panel.grid.major = element_line(color = "grey", linewidth = 0.5),  # Adjust major gridlines
+    panel.grid.minor = element_blank(),  # Hide minor gridlines for a cleaner look
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),  # Tilt x-axis labels
+    plot.background = element_rect(fill = "white", colour = NA)  # Set plot background to white
+  ) +
+  labs(title = "Nonsynonymous mutations' frequency",
+       x = "Variant Classification", 
+       y = "Relative Frequency") +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.1))  # Set y-axis breaks every 0.1
+
+# Print plot
+print(nonsyn_plot)
+
+# Save plot
+ggsave(nonsyn_plot_path, nonsyn_plot, width = 10, height = 8, dpi = 300)
+```
+
+## SIFT summary bar plot of LoF mutations
+
+```{r}
+# Define output path
+lof_SIFT_plot_path <- file.path(current_dir, 
+                           "../../results/lof_SIFT_plot.png")
+
+# Count the occurrences of each unique value in Consequence and calculate the true frequency
+top_SIFT_lof_variants <- lof_vep_df %>%
+  count(SIFT_cleaned, name = "frequency") %>%
+  mutate(true_frequency = frequency / sum(frequency)) %>%
+  arrange(desc(true_frequency)) %>%
+  slice_max(order_by = true_frequency, n = 5)
+
+# Create a bar plot with the true frequency
+lof_SIFT_plot <- ggplot(top_SIFT_lof_variants, aes(x = reorder(SIFT_cleaned, 
+                                                     -true_frequency), 
+                                                   y = true_frequency, 
+                                                   fill = SIFT_cleaned)) +
+  geom_bar(stat = "identity") +
+  scale_fill_brewer(palette = "Set1") +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", colour = "black"),
+    panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+    plot.background = element_rect(fill = "white", colour = NA)
+  ) +
+  labs(title = "Top 5 Most Frequent SIFT LoF Consequences (Relative Frequency)",
+       x = "SIFT Consequence", 
+       y = "Relative Frequency") +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.1))  # Set y-axis breaks every 0.1
+
+# Print plot
+print(lof_SIFT_plot)
+
+# Save plot
+ggsave(lof_SIFT_plot_path, lof_SIFT_plot, width = 10, height = 8, dpi = 300)
+```
+
+## PolyPhen summary bar plot of LoF mutations
+
+```{r}
+# Define output path
+lof_PolyPhen_plot_path <- file.path(current_dir, 
+                           "../../results/lof_PolyPhen_plot.png")
+
+# Count the occurrences of each unique value in Consequence and calculate the true frequency
+top_PolyPhen_lof_variants <- lof_vep_df %>%
+  count(PolyPhen_cleaned, name = "frequency") %>%
+  mutate(true_frequency = frequency / sum(frequency)) %>%
+  arrange(desc(true_frequency)) %>%
+  slice_max(order_by = true_frequency, n = 5)
+
+# Create a bar plot with the true frequency
+lof_PolyPhen_plot <- ggplot(top_PolyPhen_lof_variants, aes(x = reorder(PolyPhen_cleaned, 
+                                                     -true_frequency), 
+                                                   y = true_frequency, 
+                                                   fill = PolyPhen_cleaned)) +
+  geom_bar(stat = "identity") +
+  scale_fill_brewer(palette = "Set1") +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", colour = "black"),
+    panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+    plot.background = element_rect(fill = "white", colour = NA)
+  ) +
+  labs(title = "Top 5 Most Frequent PolyPhen LoF Consequences (Relative Frequency)",
+       x = "PolyPhen Consequence", 
+       y = "Relative Frequency") +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.1))  # Set y-axis breaks every 0.1
+
+# Print plot
+print(lof_PolyPhen_plot)
+
+# Save plot
+ggsave(lof_PolyPhen_plot_path, lof_PolyPhen_plot, width = 10, height = 8, dpi = 300)
+```
+
+## Box plot of TMB grouped by response
+
+```{r}
+# Read sup1_response.csv
+sup1_response_path <- file.path(current_dir, 
+                           "../../data/sup1_response.csv")
+sup1_response_df <- read.csv(sup1_response_path)
+
+# Merge with tmb_df
+tmb_response_df <- tmb_df %>% 
+  left_join(sup1_response_df %>% 
+            dplyr::select(Sample.ID, Patient.Response),
+            by = c("sample_id" = "Sample.ID")
+  ) %>% 
+  select(sample_id,
+         TMB,
+         patient_response = Patient.Response)
+
+# Define output path
+tmb_boxplot_path <- file.path(current_dir, 
+                           "../../results/tmb_boxplot.png")
+
+# Create a boxplot
+tmb_boxplot <- ggplot(tmb_response_df, aes(x = patient_response, 
+                                           y = TMB, 
+                                           fill = patient_response)) +
+  geom_boxplot() +
+  scale_fill_brewer(palette = "Set1") +
+  scale_x_discrete(labels = c("NR" = "Non-responders", 
+                              "R" = "Responders")) +  # Manually set x-axis labels
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", colour = "black"),
+    panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+    plot.background = element_rect(fill = "white", colour = NA)
+  ) +
+  labs(title = "TMB by Patient Response",
+       x = "Patient Response",
+       y = "Tumor Mutational Burden (TMB)")
+
+# Print plot
+print(tmb_boxplot)
+
+# Save plot
+ggsave(tmb_boxplot_path, tmb_boxplot, width = 10, height = 8, dpi = 300)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
