@@ -150,7 +150,7 @@ write.table(api_input$API_info, file = vep_file_path, row.names = FALSE, col.nam
 
 ```{r, warning=FALSE}
 ### Define path
-vep_out_data <- "../../data/vep_output_nonsyn_grch37_03.txt"
+vep_out_data <- "../../data/vep_output_nonsyn_grch37_04.txt"
 vep_path <- file.path(current_dir,
                       vep_out_data)
 
