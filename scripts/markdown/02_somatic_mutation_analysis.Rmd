@@ -233,6 +233,44 @@ datatable(tmb_df,
         )
 ```
 
+# Create binary matrices (Nonsyn and LoF)
+
+```{r}
+# ### Nonsyn df
+# nonsyn_binary <- nonsyn_maf_df %>%
+#   mutate(Liberal_consequence_binary = ifelse(Liberal_consequence == "deleterious", 1, 0)) %>%
+#   select(sample_id, Gene, SYMBOL, Liberal_consequence_binary) %>% 
+#   distinct() %>% 
+#   group_by(Gene, SYMBOL) %>%
+#   pivot_wider(names_from = sample_id,
+#               values_from = Liberal_consequence_binary,
+#               values_fill = list(Liberal_consequence_binary = 0))  # Correctly fills missing values with 0
+# 
+# # Save the lof_binary into a file
+# lof_binary_out_path <- file.path(current_dir, 
+#                       "../../data/lof_binary.csv")
+# write.csv(lof_binary, file = lof_binary_out_path, row.names = TRUE)
+# 
+# head(lof_binary)
+
+### LoF df
+lof_binary <- lof_vep_df %>%
+  mutate(Liberal_consequence_binary = ifelse(Liberal_consequence == "deleterious", 1, 0)) %>%
+  select(sample_id, Gene, SYMBOL, Liberal_consequence_binary) %>% 
+  distinct() %>% 
+  group_by(Gene, SYMBOL) %>%
+  pivot_wider(names_from = sample_id,
+              values_from = Liberal_consequence_binary,
+              values_fill = list(Liberal_consequence_binary = 0))  # Correctly fills missing values with 0
+
+# Save the lof_binary into a file
+lof_binary_out_path <- file.path(current_dir, 
+                      "../../data/lof_binary.csv")
+write.csv(lof_binary, file = lof_binary_out_path, row.names = TRUE)
+
+head(lof_binary)
+```
+
 # Plots
 
 ## Summary bar plot of Nonsynonymous mutations
@@ -240,7 +278,7 @@ datatable(tmb_df,
 ```{r}
 # Define output path
 nonsyn_plot_path <- file.path(current_dir, 
-                              "../../results/nonsyn_plot.png")
+                              "../../results/figures/nonsyn_plot.png")
 
 # Count the occurrences of each unique value in Variant_Classification
 top_variants <- nonsyn_maf_df %>%
@@ -280,7 +318,7 @@ ggsave(nonsyn_plot_path, nonsyn_plot, width = 10, height = 8, dpi = 300)
 ```{r}
 # Define output path
 lof_SIFT_plot_path <- file.path(current_dir, 
-                           "../../results/lof_SIFT_plot.png")
+                           "../../results/figures/lof_SIFT_plot.png")
 
 # Count the occurrences of each unique value in Consequence and calculate the true frequency
 top_SIFT_lof_variants <- lof_vep_df %>%
@@ -321,7 +359,7 @@ ggsave(lof_SIFT_plot_path, lof_SIFT_plot, width = 10, height = 8, dpi = 300)
 ```{r}
 # Define output path
 lof_PolyPhen_plot_path <- file.path(current_dir, 
-                           "../../results/lof_PolyPhen_plot.png")
+                           "../../results/figures/lof_PolyPhen_plot.png")
 
 # Count the occurrences of each unique value in Consequence and calculate the true frequency
 top_PolyPhen_lof_variants <- lof_vep_df %>%
@@ -377,7 +415,7 @@ tmb_response_df <- tmb_df %>%
 
 # Define output path
 tmb_boxplot_path <- file.path(current_dir, 
-                           "../../results/tmb_boxplot.png")
+                           "../../results/figures/tmb_boxplot.png")
 
 # Create a boxplot
 tmb_boxplot <- ggplot(tmb_response_df, aes(x = patient_response, 
@@ -403,6 +441,107 @@ print(tmb_boxplot)
 
 # Save plot
 ggsave(tmb_boxplot_path, tmb_boxplot, width = 10, height = 8, dpi = 300)
+```
+
+# MAFtools
+
+## Loading data
+
+```{r}
+library(maftools)
+
+# Define paths
+maf_data <- "../../data/_raw/41467_2017_1460_MOESM6_ESM_somatic_mutations.xlsx"
+maf_path <- file.path(current_dir, 
+                      maf_data)
+clinical_data <- "../../data/_raw/41467_2017_1460_MOESM4_ESM_clinical.xlsx"
+clinical_path <- file.path(current_dir, 
+                      clinical_data)
+
+# Read data
+maf_df <- read_excel(maf_path,
+                        skip=1,
+                        col_names=TRUE) %>% 
+  mutate(sample_id = sub("_[12]$", "", tumor_name)) %>% 
+  dplyr::select(sample_id, everything()) %>% 
+  arrange(sample_id)
+  
+clinical_df <- read_excel(clinical_path,
+                          skip=1,
+                          col_names=TRUE)
+colnames(clinical_df)[1] <- "sample_id"
+
+# Add Tumor_Sample_Barcode to clinical_df
+mapping_df <- maf_df %>%
+  select(sample_id, Tumor_Sample_Barcode) %>%
+  distinct()
+
+clinical_df <- clinical_df %>%
+  left_join(mapping_df, by = "sample_id")
+
+# Load maf with clinical data
+mm909 = read.maf(maf = maf_df, clinicalData = clinical_df)
+```
+
+## Summaries
+
+```{r}
+## Shows sample summry.
+getSampleSummary(mm909)
+
+## Shows gene summary.
+getGeneSummary(mm909)
+
+## Shows clinical data associated with samples
+getClinicalData(mm909)
+
+## Shows all fields in MAF
+getFields(mm909)
+
+## Writes maf summary to an output file with basename mm909.
+write.mafSummary(maf = mm909, basename = '../../results/output/somatic_mutation_analysis/mm909')
+```
+
+## Visualization
+
+```{r}
+plotmafSummary(maf = mm909, rmOutlier = TRUE, addStat = 'median', dashboard = TRUE, titvRaw = FALSE)
+```
+
+```{r}
+# Oncoplot for top ten mutated genes.
+oncoplot(maf = mm909, top = 20)
+```
+
+```{r}
+mm909.titv = titv(maf = mm909, plot = FALSE, useSyn = TRUE)
+# Plot titv summary
+plotTiTv(res = mm909.titv)
+```
+
+```{r}
+mm909.mutload = tcgaCompare(maf = mm909, cohortName = 'Example-mm909', logscale = TRUE, capture_size = 50)
+```
+
+
+# Pathway analysis (gene overrepresentation)
+
+```{r}
+library(msigdbr)
+
+BP_df = msigdbr(species = "human", category = "C5", subcategory = "BP")
+BP_list = split(x = BP_df$ensembl_gene, f = BP_df$gs_name)
+
+# LARS: For fetching gene sets. Note that this only fetches C5 which is GO terms, and the subcategory biological processes.
+# LARS: When you already have a gmt file, you can use the package GSEAbase to load it.
+
+library(GSEABase)
+
+# LARS: Then, you can use the following to calculate over representations.
+
+library(fgsea)
+
+# fora(BP_list, [vector of mutated genes], [all the genes in hg19])
 ```
 
 # Session Info

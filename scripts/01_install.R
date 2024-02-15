@@ -28,8 +28,14 @@ if (!require("jsonlite")) {
 if (!require("stringr")) {
   install.packages("stringr")
 }
+if (!require("msigdbr")) {
+  install.packages("msigdbr")
+}
 if (!requireNamespace("BiocManager", quietly = TRUE)) {
   install.packages("BiocManager")
 }
 BiocManager::install("VariantAnnotation")
 BiocManager::install("biomaRt")
+BiocManager::install("maftools")
+BiocManager::install("GSEABase")
+BiocManager::install("fgsea")
