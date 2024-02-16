@@ -50,7 +50,11 @@ maf_df <- read_excel(maf_path,
 maf_df <- maf_df %>%
   mutate(sample_id = sub("_[12]$", "", tumor_name)) %>% 
   dplyr::select(sample_id, everything()) %>% 
-  arrange(sample_id)
+  arrange(sample_id) %>% 
+  mutate(Hugo_Symbol = replace(Hugo_Symbol, Hugo_Symbol == "Unknown", NA))
+
+# Get the list of patient IDs
+sample_id_list <- as.list(unique(maf_df$sample_id))
 ```
 
 # Exploration
@@ -58,11 +62,11 @@ maf_df <- maf_df %>%
 ```{r, warning=FALSE}
 # Filter rows where Entrez_Gene_Id is 0
 missing_entrez_df <- maf_df %>%
-  filter(Entrez_Gene_Id == 0)
+  dplyr::filter(Entrez_Gene_Id == 0)
 
 # Filter rows where Hugo_Symbol is Unknown
 missing_hugo_df <- maf_df %>%
-  filter(Hugo_Symbol == 'Unknown')
+  dplyr::filter(is.na(Hugo_Symbol))
 
 n_rows_1 <- nrow(missing_entrez_df)
 n_rows_2 <- nrow(missing_hugo_df)
@@ -88,25 +92,142 @@ Number of genomic regions **missing Hugo Symbol**: `r n_rows_2`
 The **mutation categories** in the data are: `r unique_values`
 
 The mutation categories I will use as **Nonsynonymous** based on literature: `r selected_nonsyn_mutations`
- 
+
+# Annotate Ensembl Gene IDs
+
+```{r}
+library(biomaRt)
+
+# Connect to the Ensembl BioMart database for GRCh37
+ensembl = biomaRt::useMart(biomart="ENSEMBL_MART_ENSEMBL", 
+                  host="https://grch37.ensembl.org", 
+                  path="/biomart/martservice",
+                  dataset="hsapiens_gene_ensembl")
+
+# Extracting non-NA and non-zero values and ensuring they are unique
+entrez_ids <- unique(na.omit(maf_df$Entrez_Gene_Id[maf_df$Entrez_Gene_Id != 0]))
+
+# Ensure that entrez_ids is a character vector
+entrez_ids <- as.character(entrez_ids)
+
+# Retrieve Hugo symbols & Ensembl gene ids
+reannotated_df <- biomaRt::getBM(attributes = c("entrezgene_id", 
+                                                # "hgnc_symbol", 
+                                                "ensembl_gene_id"),
+                   filters = "entrezgene_id",
+                   values = entrez_ids,
+                   mart = ensembl)
+
+# Rename columns so that they match maf_df
+reannotated_df <- reannotated_df %>%
+  dplyr::rename(
+    Entrez_Gene_Id = entrezgene_id,
+    # Hugo_Symbol = hgnc_symbol,
+    Ensembl_gene_id = ensembl_gene_id
+  )
+
+# Left join reannotated_df with maf_df
+maf_df_annotated <- maf_df %>%
+  # dplyr::select(-Hugo_Symbol) %>%
+  dplyr::left_join(reannotated_df, by = "Entrez_Gene_Id") %>% 
+  dplyr::distinct() # Make sure only unique rows remain
+```
+
+```{r}
+maf_df_annotated %>%
+  dplyr::group_by(sample_id, Codon_Change, Entrez_Gene_Id, Ensembl_gene_id) %>%
+  dplyr::filter(n() > 1) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::select(sample_id, Codon_Change, Entrez_Gene_Id, Ensembl_gene_id) %>% 
+  dplyr::arrange(Entrez_Gene_Id)
+```
+
+```{r}
+maf_df_annotated %>% 
+  dplyr::filter(sample_id == "MM909_22" & Entrez_Gene_Id == 170679)
+```
+
+<!-- ```{r} -->
+<!-- maf_df %>%  -->
+<!--   group_by(sample_id, Entrez_Gene_Id, Codon_Change) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- maf_df_annotated %>%  -->
+<!--   group_by(sample_id, Codon_Change, Ensembl_gene_id) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- maf_df_rowid <- maf_df %>%  -->
+<!--   dplyr::mutate(ori_row_id = row_number(), -->
+<!--                 temp_row_id = row_number()) -->
+
+<!-- # Assuming 'Exclude_Column' is the column you want to keep but exclude from the distinct check -->
+<!-- # First, save the excluded column temporarily -->
+<!-- temp_excluded_column <- maf_df_rowid %>%  -->
+<!--   dplyr::select(row_id) -->
+
+<!-- # Then, perform distinct operation without the excluded column -->
+<!-- maf_df_distinct <- maf_df_rowid %>%  -->
+<!--   dplyr::select(-row_id) %>%  -->
+<!--   dplyr::distinct() -->
+
+<!-- # Now, bind the temporarily saved column back row-wise (assuming the order hasn't been changed) -->
+<!-- maf_df_distinct <- bind_cols(maf_df_distinct, temp_excluded_column) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- unique_maf_df <- maf_df %>%  -->
+<!--   dplyr::distinct() -->
+
+<!-- removed_rows <- dplyr::anti_join(maf_df,  -->
+<!--                                 unique_maf_df) -->
+
+<!-- print(nrow(removed_rows)) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- unique_maf_df_annotated <- maf_df_annotated %>%  -->
+<!--   dplyr::distinct() -->
+
+<!-- removed_rows <- dplyr::anti_join(maf_df_annotated,  -->
+<!--                                 unique_maf_df_annotated) -->
+
+<!-- print(nrow(removed_rows)) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- maf_df_annotated_wo_ensembl <- maf_df_annotated %>% -->
+<!--   dplyr::select(-Ensembl_gene_id) -->
+
+<!-- # Identify unique rows based on specified columns -->
+<!-- unique_rows <- maf_df_annotated_wo_ensembl %>% -->
+<!--   dplyr::distinct() -->
+
+<!-- # Find rows in the original dataframe not present in the unique set (i.e., removed rows) -->
+<!-- removed_rows <- dplyr::anti_join(maf_df_annotated_wo_ensembl,  -->
+<!--                                          unique_rows) -->
+<!-- print(nrow(removed_rows)) -->
+<!-- ``` -->
+
 # Get a list of mutations for each patient
 
 ```{r}
 # Splitting the dataframe into a list based on Sample.ID
-list_of_all_mutations <- split(maf_df, maf_df$sample_id)
+list_of_all_mutations <- split(maf_df_annotated, maf_df_annotated$sample_id)
 
-# Save the maf_df into a file
+# Save the maf_df_annotated into a file
 maf_out_path <- file.path(current_dir, 
                       "../../data/all_mutations.csv")
-write.csv(maf_df, file = maf_out_path, row.names = TRUE)
+write.csv(maf_df_annotated, file = maf_out_path, row.names = TRUE)
 ```
 
 # Get a list of Nonsynonymous mutations per patient
 
 ```{r}
-nonsyn_maf_df <- maf_df %>%
-  filter(Variant_Classification %in% nonsyn_categories) %>% 
-  arrange(sample_id)
+nonsyn_maf_df <- maf_df_annotated %>%
+  dplyr::filter(Variant_Classification %in% nonsyn_categories) %>% 
+  dplyr::arrange(sample_id)
 
 list_of_nonsyn_mutations <- split(nonsyn_maf_df, nonsyn_maf_df$sample_id)
 
@@ -159,10 +280,11 @@ vep_df <- read.csv(vep_path, header = TRUE, sep = "\t")
 
 ### Clean and wrangle
 vep_df_clean <- vep_df %>% 
-  mutate(across(everything(), ~na_if(., "-"))) %>% 
-  select(where(~any(!is.na(.)))) %>% 
-  rename(sample_id = X.Uploaded_variation) %>% 
-  mutate(
+  dplyr::mutate(across(everything(), ~na_if(., "-"))) %>% 
+  dplyr::select(where(~any(!is.na(.)))) %>% 
+  dplyr::rename(sample_id = X.Uploaded_variation,
+         Ensembl_gene_id = Gene) %>% 
+  dplyr::mutate(
     SIFT_cleaned = str_extract(SIFT, "^[^(]+"), 
     PolyPhen_cleaned = str_extract(PolyPhen, "^[^(]+"),
     Liberal_consequence = case_when(
@@ -181,8 +303,8 @@ The columns that **do not have any information** are: `r toString(setdiff(colnam
 
 ```{r}
 lof_vep_df <- vep_df_clean %>%
-  filter(Liberal_consequence == "deleterious") %>% 
-  arrange(sample_id)
+  dplyr::filter(Liberal_consequence == "deleterious") %>% 
+  dplyr::arrange(sample_id)
 
 list_of_lof_mutations <- split(lof_vep_df, lof_vep_df$sample_id)
 
@@ -199,18 +321,18 @@ write.csv(lof_vep_df, file = lof_vep_out_path, row.names = TRUE)
 sequenced_region_size_mb <- 25840698/1000000 # Taken from Ref: https://bmcresnotes.biomedcentral.com/articles/10.1186/s13104-019-4343-8
 
 # Step 2: Filter for non-synonymous mutations based on literature
-tmb_df <- maf_df %>%
-  filter(Variant_Classification %in% nonsyn_categories) %>% 
-  group_by(sample_id) %>%
-  summarise(
+tmb_df <- maf_df_annotated %>%
+  dplyr::filter(Variant_Classification %in% nonsyn_categories) %>% 
+  dplyr::group_by(sample_id) %>%
+  dplyr::summarise(
     total_mutations = n(),  # Count mutations for each sample
     TMB = total_mutations / sequenced_region_size_mb  # Calculate TMB
   ) %>%
-  mutate(TMB_class = case_when( # Define TMB class based on literature: 10 mut/Mb = High
+  dplyr::mutate(TMB_class = case_when( # Define TMB class based on literature: 10 mut/Mb = High
     TMB >= 10 ~ "High",
     TMB < 10 ~ "Low")
   ) %>% 
-  arrange(desc(TMB)) # Arrange by TMB in descending order
+  dplyr::arrange(desc(TMB)) # Arrange by TMB in descending order
 
 # View the TMB for each sample/patient
 datatable(tmb_df, 
@@ -255,10 +377,10 @@ datatable(tmb_df,
 
 ### LoF df
 lof_binary <- lof_vep_df %>%
-  mutate(Liberal_consequence_binary = ifelse(Liberal_consequence == "deleterious", 1, 0)) %>%
-  select(sample_id, Gene, SYMBOL, Liberal_consequence_binary) %>% 
-  distinct() %>% 
-  group_by(Gene, SYMBOL) %>%
+  dplyr::mutate(Liberal_consequence_binary = ifelse(Liberal_consequence == "deleterious", 1, 0)) %>%
+  dplyr::select(sample_id, Ensembl_gene_id, SYMBOL, Liberal_consequence_binary) %>% 
+  dplyr::distinct() %>% 
+  dplyr::group_by(Ensembl_gene_id, SYMBOL) %>%
   pivot_wider(names_from = sample_id,
               values_from = Liberal_consequence_binary,
               values_fill = list(Liberal_consequence_binary = 0))  # Correctly fills missing values with 0
@@ -409,7 +531,7 @@ tmb_response_df <- tmb_df %>%
             dplyr::select(Sample.ID, Patient.Response),
             by = c("sample_id" = "Sample.ID")
   ) %>% 
-  select(sample_id,
+  dplyr::select(sample_id,
          TMB,
          patient_response = Patient.Response)
 
@@ -472,8 +594,8 @@ clinical_df <- read_excel(clinical_path,
 colnames(clinical_df)[1] <- "sample_id"
 
 # Add Tumor_Sample_Barcode to clinical_df
-mapping_df <- maf_df %>%
-  select(sample_id, Tumor_Sample_Barcode) %>%
+mapping_df <- maf_df_annotated %>%
+  dplyr::select(sample_id, Tumor_Sample_Barcode) %>%
   distinct()
 
 clinical_df <- clinical_df %>%
@@ -523,25 +645,121 @@ plotTiTv(res = mm909.titv)
 mm909.mutload = tcgaCompare(maf = mm909, cohortName = 'Example-mm909', logscale = TRUE, capture_size = 50)
 ```
 
-
 # Pathway analysis (gene overrepresentation)
 
 ```{r}
+# Get a list of gene sets C5/pathways with their associated genes for Biological Processes
 library(msigdbr)
 
 BP_df = msigdbr(species = "human", category = "C5", subcategory = "BP")
 BP_list = split(x = BP_df$ensembl_gene, f = BP_df$gs_name)
+### LARS: For fetching gene sets. Note that this only fetches C5 which is GO terms, and the subcategory biological processes.
 
-# LARS: For fetching gene sets. Note that this only fetches C5 which is GO terms, and the subcategory biological processes.
-# LARS: When you already have a gmt file, you can use the package GSEAbase to load it.
+# Get a GMT file
 
-library(GSEABase)
+### LARS: When you already have a gmt file, you can use the package GSEAbase to load it.
 
-# LARS: Then, you can use the following to calculate over representations.
+# Load the GMT file using GSEABase
+# library(GSEABase)
 
+# Perform the Functional OverRepresentation Analysis (FORA) for each patient
 library(fgsea)
 
-# fora(BP_list, [vector of mutated genes], [all the genes in hg19])
+## Get all the Ensembl human Gene IDs
+library(EnsDb.Hsapiens.v75) # For GRCh37
+
+genes_info <- genes(EnsDb.Hsapiens.v75) # Get gene information including Ensembl Gene IDs
+ensembl_hgene_ids <- genes_info$gene_id # Extract the Ensembl human Gene IDs
+ensembl_hgene_ids <- unique(ensembl_hgene_ids) # Ensure uniqueness (though they should already be unique)
+
+## Perform analysis in 3 different levels
+
+fora_results_all_list <- list() # All mutations
+fora_results_nonsyn_list <- list() # Nonsyn mutations
+fora_results_lof_list <- list() # LoF mutations
+
+for(sample_id in sample_id_list) {
+  ## All mutations
+  mutated_genes_all_ids <- list_of_all_mutations[[sample_id]]$Ensembl_gene_id
+  fora_results_all_list[[sample_id]] <- fora(BP_list, mutated_genes_all_ids, ensembl_hgene_ids)
+  ## Nonsyn mutations
+  mutated_genes_nonsyn_ids <- list_of_nonsyn_mutations[[sample_id]]$Ensembl_gene_id
+  fora_results_nonsyn_list[[sample_id]] <- fora(BP_list, mutated_genes_nonsyn_ids, ensembl_hgene_ids)
+  ## LoF mutations
+  mutated_genes_lof_ids <- list_of_lof_mutations[[sample_id]]$Ensembl_gene_id
+  fora_results_lof_list[[sample_id]] <- fora(BP_list, mutated_genes_lof_ids, ensembl_hgene_ids)
+}
+```
+
+## Visualization
+
+```{r}
+# Plot enrichment (I need ranks?)
+# plotEnrichment(BP_list[["GOBP_IMMUNE_RESPONSE"]],
+#                fora_results_lof_list$MM909_02) + labs(title="Immune Response")
+```
+
+### Example with Immune-related bioprocesses of MM909_03
+
+```{r}
+fora_results_lof_list$MM909_03 %>%
+  dplyr::filter(pathway %in% c("GOBP_REGULATION_OF_IMMUNE_SYSTEM_PROCESS",
+                               "GOBP_IMMUNE_RESPONSE",
+                               "GOBP_POSITIVE_REGULATION_OF_IMMUNE_SYSTEM_PROCESS",
+                               "GOBP_REGULATION_OF_IMMUNE_RESPONSE",
+                               "GOBP_INNATE_IMMUNE_RESPONSE")
+                ) %>% 
+  dplyr::mutate(Gene_ratio = overlap / size) %>% 
+  dplyr::rename(Count = overlap) %>% 
+  dplyr::arrange(desc(Gene_ratio))
+```
+
+```{r}
+# # Define output path
+# nonsyn_plot_path <- file.path(current_dir, 
+#                               "../../results/figures/nonsyn_plot.png")
+
+# Filter the data
+top_immune_bp <- fora_results_lof_list$MM909_03 %>%
+  dplyr::filter(pathway %in% c("GOBP_REGULATION_OF_IMMUNE_SYSTEM_PROCESS",
+                               "GOBP_IMMUNE_RESPONSE",
+                               "GOBP_POSITIVE_REGULATION_OF_IMMUNE_SYSTEM_PROCESS",
+                               "GOBP_REGULATION_OF_IMMUNE_RESPONSE",
+                               "GOBP_INNATE_IMMUNE_RESPONSE")
+                ) %>% 
+  dplyr::mutate(Gene_ratio = overlap / size) %>% 
+  dplyr::rename(Count = overlap) %>% 
+  dplyr::arrange(desc(Gene_ratio))
+
+# Create a bar plot
+top_immune_bp_plot <- ggplot(top_immune_bp, aes(x = Gene_ratio, 
+                                                y = reorder(pathway,
+                                                            Gene_ratio),
+                                                size = Count,
+                                                color = padj)) +
+  geom_point() +
+  scale_color_gradient(low = "blue", high = "red") +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", colour = "black"), # Set background to white with grey border
+    panel.grid.major = element_line(color = "grey", linewidth = 0.5),  # Adjust major gridlines
+    panel.grid.minor = element_blank(),  # Hide minor gridlines for a cleaner look
+    plot.background = element_rect(fill = "white", colour = NA),  # Set plot background to white
+    legend.position = "right"
+  ) +
+  labs(title = "ORA example with immune BP of MM909_03",
+       x = "Gene Ratio", 
+       y = "Bio Process",
+       color = "p.adjust",
+       size = "Count") +
+  guides(color = guide_colorbar(title = "p.adjust"), 
+         size = guide_legend(title = "Count"))
+
+# Print plot
+print(top_immune_bp_plot)
+
+# # Save plot
+# ggsave(nonsyn_plot_path, nonsyn_plot, width = 10, height = 8, dpi = 300)
 ```
 
 # Session Info
