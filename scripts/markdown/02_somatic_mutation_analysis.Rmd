@@ -624,6 +624,26 @@ for(sample_id in sample_id_list) {
   mutated_genes_lof_ids <- list_of_lof_mutations[[sample_id]]$Ensembl_gene_id
   fora_results_lof_list[[sample_id]] <- fora(BP_list, mutated_genes_lof_ids, ensembl_hgene_ids)
 }
+
+# Save results
+## All mutations
+fora_results_all_df <- data.frame(lapply(do.call(rbind, fora_results_all_list), set_lists_to_chars), stringsAsFactors = F)
+write.csv(fora_results_all_df, 
+          file = file.path(current_dir, 
+                           "../../results/output/somatic_mutation_analysis/fora_results_all.csv"), 
+          row.names = TRUE)
+## Nonsyn mutations
+fora_results_nonsyn_df <- data.frame(lapply(do.call(rbind, fora_results_nonsyn_list), set_lists_to_chars), stringsAsFactors = F)
+write.csv(fora_results_nonsyn_df, 
+          file = file.path(current_dir, 
+                           "../../results/output/somatic_mutation_analysis/fora_results_nonsyn.csv"), 
+          row.names = TRUE)
+## LoF mutations
+fora_results_lof_df <- data.frame(lapply(do.call(rbind, fora_results_lof_list), set_lists_to_chars), stringsAsFactors = F)
+write.csv(fora_results_lof_df, 
+          file = file.path(current_dir, 
+                           "../../results/output/somatic_mutation_analysis/fora_results_lof.csv"), 
+          row.names = TRUE)
 ```
 
 ## Visualization
