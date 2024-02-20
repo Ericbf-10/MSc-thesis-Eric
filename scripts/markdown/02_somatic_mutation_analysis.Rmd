@@ -16,6 +16,8 @@ output:
     number_sections: true
 ---
 
+# Load data
+
 ```{r, message=FALSE}
 ### Load required libraries
 library(readxl)
@@ -48,16 +50,17 @@ maf_df <- read_excel(maf_path,
 
 ### Add a sample ID column
 maf_df <- maf_df %>%
-  mutate(sample_id = sub("_[12]$", "", tumor_name)) %>% 
+  dplyr::mutate(sample_id = sub("_[12]$", "", tumor_name)) %>% 
   dplyr::select(sample_id, everything()) %>% 
-  arrange(sample_id) %>% 
-  mutate(Hugo_Symbol = replace(Hugo_Symbol, Hugo_Symbol == "Unknown", NA))
+  dplyr::arrange(sample_id) %>% 
+  dplyr::mutate(Hugo_Symbol = replace(Hugo_Symbol, Hugo_Symbol == "Unknown", NA)) %>% 
+  dplyr::distinct() # Drops 2 rows that were duplicated in the original dataset
 
 # Get the list of patient IDs
 sample_id_list <- as.list(unique(maf_df$sample_id))
 ```
 
-# Exploration
+# Initial considerations
 
 ```{r, warning=FALSE}
 # Filter rows where Entrez_Gene_Id is 0
@@ -70,24 +73,19 @@ missing_hugo_df <- maf_df %>%
 
 n_rows_1 <- nrow(missing_entrez_df)
 n_rows_2 <- nrow(missing_hugo_df)
-
-# print(paste("Number of genomic regions missing an Entrez ID:", n_rows_1))
-# print(paste("Number of genomic regions missing Hugo Symbol:", n_rows_2))
-
-# How many different types of mutations has the dataset?
-unique_values <- unique(maf_df$Variant_Classification)
-# print(paste("The mutation categories in the data:", toString(unique_values)))
-
-# For selected nonsynonymous mutations based on literature
-selected_nonsyn_mutations <- c(unique_values[1], unique_values[2], unique_values[7], unique_values[10], unique_values[12])
-# print(paste("The mutation categories I will use as Nonsynonymous based on literature:", toString(selected_mutations)))
 ```
-
-## Initial considerations
 
 Number of genomic regions **missing an Entrez ID**: `r n_rows_1`
 
 Number of genomic regions **missing Hugo Symbol**: `r n_rows_2`
+
+```{r}
+# How many different types of mutations has the dataset?
+unique_values <- unique(maf_df$Variant_Classification)
+
+# For selected nonsynonymous mutations based on literature
+selected_nonsyn_mutations <- c(unique_values[1], unique_values[2], unique_values[7], unique_values[10], unique_values[12])
+```
 
 The **mutation categories** in the data are: `r unique_values`
 
@@ -112,7 +110,7 @@ entrez_ids <- as.character(entrez_ids)
 
 # Retrieve Hugo symbols & Ensembl gene ids
 reannotated_df <- biomaRt::getBM(attributes = c("entrezgene_id", 
-                                                # "hgnc_symbol", 
+                                                # "hgnc_symbol",
                                                 "ensembl_gene_id"),
                    filters = "entrezgene_id",
                    values = entrez_ids,
@@ -130,85 +128,24 @@ reannotated_df <- reannotated_df %>%
 maf_df_annotated <- maf_df %>%
   # dplyr::select(-Hugo_Symbol) %>%
   dplyr::left_join(reannotated_df, by = "Entrez_Gene_Id") %>% 
-  dplyr::distinct() # Make sure only unique rows remain
+  dplyr::distinct() %>% # Make sure only unique rows remain
+  dplyr::group_by_at(vars(names(maf_df))) %>% # Group by everything except Ensembl Gene IDs
+  dplyr::slice(1) %>% # Remove duplicated Ensemble Gene IDs, keep the first appearance
+  dplyr::ungroup()
 ```
+
+There is a "problem" here: some Entrez IDs are mapped to several Ensembl Gene IDs. I need to resolve this because otherwise it will impact the TMB calculation and possibly other analyses. I decided to keep the first Ensembl Gene ID that appears in the table for equal rows, but I need to double check if there is a better method to do this.
 
 ```{r}
-maf_df_annotated %>%
-  dplyr::group_by(sample_id, Codon_Change, Entrez_Gene_Id, Ensembl_gene_id) %>%
-  dplyr::filter(n() > 1) %>% 
-  dplyr::ungroup() %>% 
-  dplyr::select(sample_id, Codon_Change, Entrez_Gene_Id, Ensembl_gene_id) %>% 
-  dplyr::arrange(Entrez_Gene_Id)
+# DEBUG: Rows that are equal but have 2 Ensembl_gene_ids
+maf_df_annotated2 <- maf_df_annotated %>% 
+  dplyr::select(-Ensembl_gene_id)
+duplicated_rows <- maf_df_annotated2[duplicated(maf_df_annotated2) | duplicated(maf_df_annotated2, fromLast = TRUE), ]
+duplicated_rows <- duplicated_rows %>%
+  left_join(dplyr::select(maf_df_annotated, c(all_of(colnames(maf_df)), "Ensembl_gene_id")), by = colnames(maf_df)) %>% 
+  dplyr::distinct()
+duplicated_rows
 ```
-
-```{r}
-maf_df_annotated %>% 
-  dplyr::filter(sample_id == "MM909_22" & Entrez_Gene_Id == 170679)
-```
-
-<!-- ```{r} -->
-<!-- maf_df %>%  -->
-<!--   group_by(sample_id, Entrez_Gene_Id, Codon_Change) -->
-<!-- ``` -->
-
-<!-- ```{r} -->
-<!-- maf_df_annotated %>%  -->
-<!--   group_by(sample_id, Codon_Change, Ensembl_gene_id) -->
-<!-- ``` -->
-
-<!-- ```{r} -->
-<!-- maf_df_rowid <- maf_df %>%  -->
-<!--   dplyr::mutate(ori_row_id = row_number(), -->
-<!--                 temp_row_id = row_number()) -->
-
-<!-- # Assuming 'Exclude_Column' is the column you want to keep but exclude from the distinct check -->
-<!-- # First, save the excluded column temporarily -->
-<!-- temp_excluded_column <- maf_df_rowid %>%  -->
-<!--   dplyr::select(row_id) -->
-
-<!-- # Then, perform distinct operation without the excluded column -->
-<!-- maf_df_distinct <- maf_df_rowid %>%  -->
-<!--   dplyr::select(-row_id) %>%  -->
-<!--   dplyr::distinct() -->
-
-<!-- # Now, bind the temporarily saved column back row-wise (assuming the order hasn't been changed) -->
-<!-- maf_df_distinct <- bind_cols(maf_df_distinct, temp_excluded_column) -->
-<!-- ``` -->
-
-<!-- ```{r} -->
-<!-- unique_maf_df <- maf_df %>%  -->
-<!--   dplyr::distinct() -->
-
-<!-- removed_rows <- dplyr::anti_join(maf_df,  -->
-<!--                                 unique_maf_df) -->
-
-<!-- print(nrow(removed_rows)) -->
-<!-- ``` -->
-
-<!-- ```{r} -->
-<!-- unique_maf_df_annotated <- maf_df_annotated %>%  -->
-<!--   dplyr::distinct() -->
-
-<!-- removed_rows <- dplyr::anti_join(maf_df_annotated,  -->
-<!--                                 unique_maf_df_annotated) -->
-
-<!-- print(nrow(removed_rows)) -->
-<!-- ``` -->
-
-<!-- ```{r} -->
-<!-- maf_df_annotated_wo_ensembl <- maf_df_annotated %>% -->
-<!--   dplyr::select(-Ensembl_gene_id) -->
-
-<!-- # Identify unique rows based on specified columns -->
-<!-- unique_rows <- maf_df_annotated_wo_ensembl %>% -->
-<!--   dplyr::distinct() -->
-
-<!-- # Find rows in the original dataframe not present in the unique set (i.e., removed rows) -->
-<!-- removed_rows <- dplyr::anti_join(maf_df_annotated_wo_ensembl,  -->
-<!--                                          unique_rows) -->
-<!-- print(nrow(removed_rows)) -->
-<!-- ``` -->
 
 # Get a list of mutations for each patient
 
@@ -293,8 +230,6 @@ vep_df_clean <- vep_df %>%
       TRUE ~ "non-deleterious"
     )
   )
-
-# print(paste("The columns that do not have any information are:", toString(setdiff(colnames(vep_df), colnames(vep_df_clean)))))
 ```
 
 The columns that **do not have any information** are: `r toString(setdiff(colnames(vep_df), colnames(vep_df_clean)))`
@@ -715,9 +650,9 @@ fora_results_lof_list$MM909_03 %>%
 ```
 
 ```{r}
-# # Define output path
-# nonsyn_plot_path <- file.path(current_dir, 
-#                               "../../results/figures/nonsyn_plot.png")
+# Define output path
+mm909_03_immune_bp_plot_path <- file.path(current_dir,
+                              "../../results/figures/mm909_03_immune_bp_plot.png")
 
 # Filter the data
 top_immune_bp <- fora_results_lof_list$MM909_03 %>%
@@ -758,8 +693,8 @@ top_immune_bp_plot <- ggplot(top_immune_bp, aes(x = Gene_ratio,
 # Print plot
 print(top_immune_bp_plot)
 
-# # Save plot
-# ggsave(nonsyn_plot_path, nonsyn_plot, width = 10, height = 8, dpi = 300)
+# Save plot
+ggsave(mm909_03_immune_bp_plot_path, top_immune_bp_plot, width = 10, height = 8, dpi = 300)
 ```
 
 # Session Info

@@ -351,6 +351,69 @@ vep_df_clean %>%
   arrange(desc(n))
 ```
 
+```{r}
+maf_df %>%
+  group_by(sample_id, Entrez_Gene_Id, Codon_Change)
+```
+
+```{r}
+maf_df_annotated %>%
+  group_by(sample_id, Codon_Change, Ensembl_gene_id)
+```
+
+```{r}
+maf_df_rowid <- maf_df %>%
+  dplyr::mutate(ori_row_id = row_number(),
+                temp_row_id = row_number())
+
+# Assuming 'Exclude_Column' is the column you want to keep but exclude from the distinct check
+# First, save the excluded column temporarily
+temp_excluded_column <- maf_df_rowid %>%
+  dplyr::select(row_id)
+
+# Then, perform distinct operation without the excluded column
+maf_df_distinct <- maf_df_rowid %>%
+  dplyr::select(-row_id) %>%
+  dplyr::distinct()
+
+# Now, bind the temporarily saved column back row-wise (assuming the order hasn't been changed)
+maf_df_distinct <- bind_cols(maf_df_distinct, temp_excluded_column)
+```
+
+```{r}
+unique_maf_df <- maf_df %>%
+  dplyr::distinct()
+
+removed_rows <- dplyr::anti_join(maf_df,
+                                unique_maf_df)
+
+print(nrow(removed_rows))
+```
+
+```{r}
+unique_maf_df_annotated <- maf_df_annotated %>%
+  dplyr::distinct()
+
+removed_rows <- dplyr::anti_join(maf_df_annotated,
+                                unique_maf_df_annotated)
+
+print(nrow(removed_rows))
+```
+
+```{r}
+maf_df_annotated_wo_ensembl <- maf_df_annotated %>%
+  dplyr::select(-Ensembl_gene_id)
+
+# Identify unique rows based on specified columns
+unique_rows <- maf_df_annotated_wo_ensembl %>%
+  dplyr::distinct()
+
+# Find rows in the original dataframe not present in the unique set (i.e., removed rows)
+removed_rows <- dplyr::anti_join(maf_df_annotated_wo_ensembl,
+                                         unique_rows)
+print(nrow(removed_rows))
+```
+
 ## Session Info
 
 ```{r}
