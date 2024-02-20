@@ -582,6 +582,8 @@ mm909.mutload = tcgaCompare(maf = mm909, cohortName = 'Example-mm909', logscale 
 
 # Pathway analysis (gene overrepresentation)
 
+## First analysis using C5 - BP
+
 ```{r}
 # Get a list of gene sets C5/pathways with their associated genes for Biological Processes
 library(msigdbr)
@@ -646,15 +648,7 @@ write.csv(fora_results_lof_df,
           row.names = TRUE)
 ```
 
-## Visualization
-
-```{r}
-# Plot enrichment (I need ranks?)
-# plotEnrichment(BP_list[["GOBP_IMMUNE_RESPONSE"]],
-#                fora_results_lof_list$MM909_02) + labs(title="Immune Response")
-```
-
-### Example with Immune-related bioprocesses of MM909_03
+### Visualization: Example with Immune-related bioprocesses of MM909_03
 
 ```{r}
 fora_results_lof_list$MM909_03 %>%
@@ -715,6 +709,125 @@ print(top_immune_bp_plot)
 
 # Save plot
 ggsave(mm909_03_immune_bp_plot_path, top_immune_bp_plot, width = 10, height = 8, dpi = 300)
+```
+
+## Second analysis using H
+
+```{r}
+# Explore what H Gene Sets exist for Human
+all_gene_sets <- msigdbr(species = "Homo sapiens")
+all_gene_sets %>%
+  dplyr::filter(gs_cat == "H")
+```
+
+```{r}
+# Get a list of gene sets H/pathways with their associated genes
+library(msigdbr)
+
+BP_h_df = msigdbr(species = "human", category = "H")
+BP_h_list = split(x = BP_h_df$ensembl_gene, f = BP_h_df$gs_name)
+### LARS: For fetching gene sets. Note that this only fetches C5 which is GO terms, and the subcategory biological processes.
+
+# Get a GMT file
+
+### LARS: When you already have a gmt file, you can use the package GSEAbase to load it.
+
+# Load the GMT file using GSEABase
+# library(GSEABase)
+
+# Perform the Functional OverRepresentation Analysis (FORA) for each patient
+library(fgsea)
+
+## Get all the Ensembl human Gene IDs
+library(EnsDb.Hsapiens.v75) # For GRCh37
+
+genes_info <- genes(EnsDb.Hsapiens.v75) # Get gene information including Ensembl Gene IDs
+ensembl_hgene_ids <- genes_info$gene_id # Extract the Ensembl human Gene IDs
+ensembl_hgene_ids <- unique(ensembl_hgene_ids) # Ensure uniqueness (though they should already be unique)
+
+## Perform analysis in 3 different levels
+
+fora_results_h_all_list <- list() # All mutations
+fora_results_h_nonsyn_list <- list() # Nonsyn mutations
+fora_results_h_lof_list <- list() # LoF mutations
+
+for(sample_id in sample_id_list) {
+  ## All mutations
+  mutated_genes_all_ids <- list_of_all_mutations[[sample_id]]$Ensembl_gene_id
+  fora_results_h_all_list[[sample_id]] <- fora(BP_h_list, mutated_genes_all_ids, ensembl_hgene_ids)
+  ## Nonsyn mutations
+  mutated_genes_nonsyn_ids <- list_of_nonsyn_mutations[[sample_id]]$Ensembl_gene_id
+  fora_results_h_nonsyn_list[[sample_id]] <- fora(BP_h_list, mutated_genes_nonsyn_ids, ensembl_hgene_ids)
+  ## LoF mutations
+  mutated_genes_lof_ids <- list_of_lof_mutations[[sample_id]]$Ensembl_gene_id
+  fora_results_h_lof_list[[sample_id]] <- fora(BP_h_list, mutated_genes_lof_ids, ensembl_hgene_ids)
+}
+
+# Save results
+## All mutations
+fora_results_h_all_df <- data.frame(lapply(do.call(rbind, fora_results_h_all_list), set_lists_to_chars), stringsAsFactors = F)
+write.csv(fora_results_h_all_df, 
+          file = file.path(current_dir, 
+                           "../../results/output/somatic_mutation_analysis/fora_results_h_all.csv"), 
+          row.names = TRUE)
+## Nonsyn mutations
+fora_results_h_nonsyn_df <- data.frame(lapply(do.call(rbind, fora_results_h_nonsyn_list), set_lists_to_chars), stringsAsFactors = F)
+write.csv(fora_results_h_nonsyn_df, 
+          file = file.path(current_dir, 
+                           "../../results/output/somatic_mutation_analysis/fora_results_h_nonsyn.csv"), 
+          row.names = TRUE)
+## LoF mutations
+fora_results_h_lof_df <- data.frame(lapply(do.call(rbind, fora_results_h_lof_list), set_lists_to_chars), stringsAsFactors = F)
+write.csv(fora_results_h_lof_df, 
+          file = file.path(current_dir, 
+                           "../../results/output/somatic_mutation_analysis/fora_results_h_lof.csv"), 
+          row.names = TRUE)
+```
+
+### Visualization: Example with Hallmark_apoptosis of MM909_03
+
+```{r}
+# Define output path
+mm909_03_h_apoptosis_plot_path <- file.path(current_dir,
+                              "../../results/figures/mm909_03_h_apoptosis_plot.png")
+
+# Filter the data
+h_apoptosis <- fora_results_h_lof_list$MM909_03 %>%
+  dplyr::filter(pathway %in% c("HALLMARK_APOPTOSIS")
+                ) %>% 
+  dplyr::mutate(Gene_ratio = overlap / size) %>% 
+  dplyr::rename(Count = overlap) %>% 
+  dplyr::arrange(desc(Gene_ratio))
+
+# Create a bar plot
+h_apoptosis_plot <- ggplot(h_apoptosis, aes(x = Gene_ratio, 
+                                                y = reorder(pathway,
+                                                            Gene_ratio),
+                                                size = Count,
+                                                color = padj)) +
+  geom_point() +
+  scale_color_gradient(low = "blue", high = "red") +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", colour = "black"), # Set background to white with grey border
+    panel.grid.major = element_line(color = "grey", linewidth = 0.5),  # Adjust major gridlines
+    panel.grid.minor = element_blank(),  # Hide minor gridlines for a cleaner look
+    plot.background = element_rect(fill = "white", colour = NA),  # Set plot background to white
+    legend.position = "right"
+  ) +
+  labs(title = "ORA example with immune BP of MM909_03",
+       x = "Gene Ratio", 
+       y = "Hallmark apoptosis",
+       color = "p.adjust",
+       size = "Count") +
+  guides(color = guide_colorbar(title = "p.adjust"), 
+         size = guide_legend(title = "Count"))
+
+# Print plot
+print(h_apoptosis_plot)
+
+# Save plot
+ggsave(mm909_03_h_apoptosis_plot_path, h_apoptosis_plot, width = 10, height = 8, dpi = 300)
 ```
 
 # Session Info
