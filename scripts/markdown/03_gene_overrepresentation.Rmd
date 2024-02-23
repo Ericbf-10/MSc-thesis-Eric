@@ -124,13 +124,13 @@ fora_results_lof_list <- list() # LoF mutations
 
 for(sample_id in sample_id_list) {
   ## All mutations
-  mutated_genes_all_ids <- list_of_all_mutations[[sample_id]]$Ensembl_gene_id
+  mutated_genes_all_ids <- list_of_all_mutations[[sample_id]]$ensembl_id
   fora_results_all_list[[sample_id]] <- fora(BP_list, mutated_genes_all_ids, ensembl_hgene_ids)
   ## Nonsyn mutations
-  mutated_genes_nonsyn_ids <- list_of_nonsyn_mutations[[sample_id]]$Ensembl_gene_id
+  mutated_genes_nonsyn_ids <- list_of_nonsyn_mutations[[sample_id]]$ensembl_id
   fora_results_nonsyn_list[[sample_id]] <- fora(BP_list, mutated_genes_nonsyn_ids, ensembl_hgene_ids)
   ## LoF mutations
-  mutated_genes_lof_ids <- list_of_lof_mutations[[sample_id]]$Ensembl_gene_id
+  mutated_genes_lof_ids <- list_of_lof_mutations[[sample_id]]$ensembl_id
   fora_results_lof_list[[sample_id]] <- fora(BP_list, mutated_genes_lof_ids, ensembl_hgene_ids)
 }
 
@@ -244,13 +244,13 @@ fora_results_h_lof_list <- list() # LoF mutations
 
 for(sample_id in sample_id_list) {
   ## All mutations
-  mutated_genes_all_ids <- list_of_all_mutations[[sample_id]]$Ensembl_gene_id
+  mutated_genes_all_ids <- list_of_all_mutations[[sample_id]]$ensembl_id
   fora_results_h_all_list[[sample_id]] <- fora(BP_h_list, mutated_genes_all_ids, ensembl_hgene_ids)
   ## Nonsyn mutations
-  mutated_genes_nonsyn_ids <- list_of_nonsyn_mutations[[sample_id]]$Ensembl_gene_id
+  mutated_genes_nonsyn_ids <- list_of_nonsyn_mutations[[sample_id]]$ensembl_id
   fora_results_h_nonsyn_list[[sample_id]] <- fora(BP_h_list, mutated_genes_nonsyn_ids, ensembl_hgene_ids)
   ## LoF mutations
-  mutated_genes_lof_ids <- list_of_lof_mutations[[sample_id]]$Ensembl_gene_id
+  mutated_genes_lof_ids <- list_of_lof_mutations[[sample_id]]$ensembl_id
   fora_results_h_lof_list[[sample_id]] <- fora(BP_h_list, mutated_genes_lof_ids, ensembl_hgene_ids)
 }
 
@@ -272,62 +272,71 @@ write.csv(fora_results_h_lof_df,
           row.names = TRUE)
 ```
 
-### Visualization: Example with Hallmark_apoptosis of MM909_03
+### Visualization: Example with top H across samples
 
 ```{r, message=FALSE, warning=FALSE}
 # Define output path
-mm909_03_20_h_plot_path <- file.path(figures_path,
-                              "mm909_03_20_h_plot.png")
+mm909_h_plot_path <- file.path(figures_path,
+                              "mm909_h_plot.png")
 
-# Prepare data for MM909_03
-mm909_03_data <- fora_results_h_lof_list$MM909_03 %>%
-  mutate(Gene_ratio = overlap / size,
-         Count = overlap,
-         sample_id = "MM909_03") %>%
-  slice_min(order_by = padj, n = 5) %>%
-  arrange(desc(Gene_ratio))
+# Prepare data for all samples in the list
+prepared_data_list <- lapply(names(fora_results_h_lof_list), function(sample_id) {
+  fora_results_h_lof_list[[sample_id]] %>%
+    dplyr::mutate(Gene_ratio = overlap / size,
+           Count = overlap,
+           sample_id = sample_id) %>%
+    dplyr::slice_min(order_by = padj, n = 5) %>%
+    dplyr::arrange(desc(Gene_ratio))
+})
 
-# Prepare data for MM909_20
-mm909_20_data <- fora_results_h_lof_list$MM909_20 %>%
-  mutate(Gene_ratio = overlap / size,
-         Count = overlap,
-         sample_id = "MM909_20") %>%
-  slice_min(order_by = padj, n = 5) %>%
-  arrange(desc(Gene_ratio))
+# Combine all prepared datasets into one
+combined_data <- bind_rows(prepared_data_list)
 
-# Combine both datasets
-mm909_03_20_h <- rbind(mm909_03_data, mm909_20_data)
+# Merge response info
+combined_data <- combined_data %>% 
+  dplyr::left_join(response_df, by = "sample_id")
 
-# Create a bar plot
-mm909_03_20_h_plot <- ggplot(mm909_03_20_h, aes(x = Gene_ratio, 
-                                                y = reorder(pathway,
-                                                            Gene_ratio),
-                                                size = Count,
-                                                color = padj)) +
+# Step 1: Create an ordered factor for sample_id based on patient_response
+# First, create a mapping of sample_id to patient_response
+response_order <- combined_data %>%
+  dplyr::select(sample_id, patient_response) %>%
+  dplyr::distinct() %>%
+  dplyr::arrange(patient_response, sample_id) # Arrange so that "R" comes before "NR"
+
+# Use this ordering to reorder sample_id in the combined data
+combined_data$sample_id <- factor(combined_data$sample_id,
+                                  levels = response_order$sample_id)
+
+# Step 2: Plot with ordered sample_id and facets to distinguish "R" and "NR"
+mm909_h_plot <- ggplot(combined_data, aes(x = sample_id, 
+                                          y = reorder(pathway, Gene_ratio),
+                                          size = Gene_ratio,
+                                          color = padj)) +
   geom_point() +
   scale_color_gradient(low = "blue", high = "red") +
+  facet_grid(. ~ patient_response, scales = "free_x", space = "free_x") + # Facets for "R" and "NR"
   theme_minimal() +
   theme(
-    panel.background = element_rect(fill = "white", colour = "black"), # Set background to white with grey border
-    panel.grid.major = element_line(color = "grey", linewidth = 0.5),  # Adjust major gridlines
-    panel.grid.minor = element_blank(),  # Hide minor gridlines for a cleaner look
-    plot.background = element_rect(fill = "white", colour = NA),  # Set plot background to white
-    legend.position = "right"
+    panel.background = element_rect(fill = "white", colour = "black"),
+    panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+    plot.background = element_rect(fill = "white", colour = NA),
+    legend.position = "right",
+    axis.text.x = element_text(angle = 45, hjust = 1) # Tilt x labels 45 degrees
   ) +
-  labs(title = "FORA example with top H of MM909_03 vs MM909_20",
-       x = "Gene Ratio", 
+  labs(title = "FORA example with top H across samples",
+       x = "Sample ID", 
        y = "Top H Gene Sets",
        color = "p.adjust",
-       size = "Count") +
+       size = "Gene Ratio") +
   guides(color = guide_colorbar(title = "p.adjust"), 
-         size = guide_legend(title = "Count")) +
-  facet_wrap(~sample_id, scales = "free_y")
+         size = guide_legend(title = "Gene Ratio"))
 
 # Print plot
-print(mm909_03_20_h_plot)
+print(mm909_h_plot)
 
 # Save plot
-ggsave(mm909_03_20_h_plot_path, mm909_03_20_h_plot, width = 10, height = 8, dpi = 300)
+ggsave(mm909_h_plot_path, mm909_h_plot, width = 12, height = 8, dpi = 300)
 ```
 
 ### Visualization: Example with Hallmark_apoptosis R vs NR
