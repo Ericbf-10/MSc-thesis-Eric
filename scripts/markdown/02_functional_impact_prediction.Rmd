@@ -1,0 +1,623 @@
+---
+title: "Impact of dysfunctional ubiquitination in response to cancer immunotherapy"
+subtitle: <center> Somatic mutations analysis - Functional Impact Prediction </center>
+author: "Eric Bautista Farrerons (s212514)"
+date: '`r paste("First created on January 2024. Updated on ", format(Sys.Date(), "%d %B %Y"))`'
+output:
+  html_document:
+    css: style.css
+    code_folding: hide
+    fig_caption: yes
+    toc: yes
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    toc_depth: 4
+    number_sections: true
+---
+
+# Load data
+
+```{r, message=FALSE, warning=FALSE}
+### Load required libraries
+library(readxl)
+library(tidyverse)
+library(purrr)
+library(dplyr)
+library(knitr)
+library(DT)
+library(httr)
+library(jsonlite)
+library(stringr)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(limma)
+
+### Load functions
+source(file = "../02_functions.R")
+
+### Define paths
+current_dir <- getwd()
+
+# Results
+results_pc_path <- file.path(current_dir,
+                              "../../results/output/patient_characteristics")
+results_fip_path <- file.path(current_dir,
+                              "../../results/output/somatic_mutation_analysis/functional_impact_prediction")
+figures_path <- file.path(current_dir, 
+                                 "../../results/figures")
+
+# MAF-like file
+maf_data <- "../../data/_raw/41467_2017_1460_MOESM6_ESM_somatic_mutations.xlsx"
+maf_path <- file.path(current_dir, 
+                      maf_data)
+# Sup1 data
+sup1_response_path <- file.path(results_pc_path, 
+                           "sup1_response.csv")
+
+### Define variables
+nonsyn_categories <- c("Missense_Mutation", "Nonsense_Mutation", "Nonstop_Mutation", "Start_Codon_SNP", "Splice_Site")
+
+### Read data & wrangle
+## Read maf-like file
+maf_df <- read_excel(maf_path,
+                        skip=1,
+                        col_names=TRUE)
+
+# Add a sample ID column
+maf_df <- maf_df %>%
+  dplyr::mutate(sample_id = sub("_[12]$", "", tumor_name)) %>% 
+  dplyr::rename(entrez_id = Entrez_Gene_Id,
+                hugo_symbol = Hugo_Symbol) %>%
+  dplyr::mutate(hugo_symbol = replace(hugo_symbol, hugo_symbol == "Unknown", NA),
+                entrez_id = replace(entrez_id, entrez_id == 0, NA)) %>% 
+  dplyr::select(sample_id, entrez_id, hugo_symbol, everything()) %>% 
+  dplyr::arrange(sample_id) %>% 
+  dplyr::distinct() %>% # Drops 2 rows that were duplicated in the original dataset
+  dplyr::filter(!is.na(hugo_symbol) | !is.na(entrez_id)) # Drop where both Entrez, Hugo have NAs
+
+# Convert Hugo Symbols to official naming
+## Step 1: Filter out rows with NA in hugo_symbol
+hugo_symbols <- maf_df %>% 
+  dplyr::filter(!is.na(hugo_symbol)) %>% 
+  dplyr::pull(hugo_symbol) %>% 
+  as.character()
+
+## Step 2: Convert to official name
+ofc_hugo_symbols <- alias2SymbolTable(hugo_symbols, species = "Hs")
+
+## Step 3: Add the ofc_hugo_symbols to the dataframe
+maf_df$update_indicator <- !is.na(maf_df$hugo_symbol) & maf_df$hugo_symbol %in% hugo_symbols # Create an temp indicator for rows to update
+maf_df <- maf_df %>%
+  dplyr::mutate(hugo_symbol = ifelse(update_indicator, ofc_hugo_symbols[match(hugo_symbol, hugo_symbols)], hugo_symbol)) %>%
+  dplyr::select(-update_indicator) %>% # Remove the indicator column after updating
+  dplyr::filter(!is.na(hugo_symbol) | !is.na(entrez_id)) # Drop where both Entrez, Hugo have NAs (again)
+
+## Read sup1_response.csv
+sup1_response_df <- read.csv(sup1_response_path)[ , -1] # Drop first column
+
+# Create a list of Responders and Non-responders
+sample_id_lists <- split(sup1_response_df$Sample.ID, 
+                         sup1_response_df$Patient.Response) # Split the "Sample.ID" values into lists based on "Patient.Response"
+
+r_sample_ids <- sample_id_lists$R
+nr_sample_ids <- sample_id_lists$NR
+```
+
+# Initial considerations
+
+```{r, message=FALSE, warning=FALSE}
+# Filter rows where entrez_id is 0
+missing_entrez_df <- maf_df %>%
+  dplyr::filter(is.na(entrez_id))
+
+# Filter rows where Hugo_Symbol is Unknown
+missing_hugo_df <- maf_df %>%
+  dplyr::filter(is.na(hugo_symbol))
+
+n_rows_1 <- nrow(missing_entrez_df)
+n_rows_2 <- nrow(missing_hugo_df)
+```
+
+Number of genomic regions **missing an Entrez ID**: `r n_rows_1`
+
+Number of genomic regions **missing Hugo Symbol**: `r n_rows_2`
+
+```{r, message=FALSE, warning=FALSE}
+# How many different types of mutations has the dataset?
+unique_values <- unique(maf_df$Variant_Classification)
+
+# For selected nonsynonymous mutations based on literature
+selected_nonsyn_mutations <- c(unique_values[1], unique_values[2], unique_values[7], unique_values[10], unique_values[12])
+```
+
+The **mutation categories** in the data are: `r unique_values`
+
+The mutation categories I will use as **Nonsynonymous** based on literature: `r selected_nonsyn_mutations`
+
+# Re-annotate Entrez IDs, Hugo Symbols, Ensembl Gene IDs
+
+```{r, message=FALSE, warning=FALSE}
+maf_df_annotated <- maf_df
+
+#1 Re-annotate Hugo Symbols with Entrez IDs
+## Step 1: Filter in rows with NA in hugo_symbol
+entrez_ids <- maf_df_annotated %>% 
+  dplyr::filter(is.na(hugo_symbol)) %>% 
+  dplyr::pull(entrez_id) %>% 
+  as.character()
+
+## Step 2: Map Entrez IDs to Hugo Symbols
+new_hugo_symbols <- ENTREZtoSYMBOL(entrez_ids)
+
+## Step 3: Add the new_hugo_symbols to the dataframe
+maf_df_annotated$update_indicator <- is.na(maf_df_annotated$hugo_symbol) & maf_df_annotated$entrez_id %in% entrez_ids # Create an temp indicator for rows to update
+maf_df_annotated <- maf_df_annotated %>%
+  dplyr::mutate(hugo_symbol = ifelse(update_indicator, new_hugo_symbols[match(entrez_id, entrez_ids)], hugo_symbol)) %>%
+  dplyr::select(-update_indicator)  # Remove the indicator column after updating
+
+#2 Re-annotate Entrez IDs with Hugo Symbols
+## Step 1: Filter in rows with NA in entrez_id
+hugo_symbols <- maf_df_annotated %>% 
+  dplyr::filter(is.na(entrez_id)) %>% 
+  dplyr::pull(hugo_symbol) %>% 
+  as.character()
+
+## Step 2: Map Hugo Symbols to Entrez IDs
+new_entrez_ids <- SYMBOLtoENTREZ(hugo_symbols)
+
+## Step 3: Add the new_entrez_ids to the dataframe
+maf_df_annotated$update_indicator <- is.na(maf_df_annotated$entrez_id) & maf_df_annotated$hugo_symbol %in% hugo_symbols # Create an temp indicator for rows to update
+maf_df_annotated <- maf_df_annotated %>%
+  dplyr::mutate(entrez_id = ifelse(update_indicator, new_entrez_ids[match(hugo_symbol, hugo_symbols)], entrez_id)) %>%
+  dplyr::select(-update_indicator)  # Remove the indicator column after updating
+
+#3 Annotate Ensembl Gene IDs with Entrez IDs
+## Step 1: Get entrez_ids
+entrez_ids <- maf_df_annotated %>% 
+  dplyr::pull(entrez_id) %>% 
+  as.character()
+
+## Step 2: Map Entrez IDs to Ensembl Gene IDs
+ensembl_ids <- ENTREZtoENSEMBL(entrez_ids)
+
+## Step 3: Add the new_entrez_ids to the dataframe
+maf_df_annotated <- maf_df_annotated %>%
+  dplyr::mutate(ensembl_id = ensembl_ids) %>% 
+  dplyr::select(sample_id, ensembl_id, entrez_id, hugo_symbol, everything())
+```
+
+There is a "problem" here: some Entrez IDs are mapped to several Ensembl Gene IDs. I need to resolve this because otherwise it will impact the TMB calculation and possibly other analyses. I decided to keep the first Ensembl Gene ID that appears in the table for equal rows.
+
+# Get a list of mutations for each patient
+
+```{r, message=FALSE, warning=FALSE}
+# Splitting the dataframe into a list based on Sample.ID
+list_of_all_mutations <- split(maf_df_annotated, maf_df_annotated$sample_id)
+
+# Save the maf_df_annotated into a file
+maf_out_path <- file.path(results_fip_path, "all_mutations.csv")
+write.csv(maf_df_annotated, file = maf_out_path, row.names = TRUE)
+```
+
+# Get a list of Nonsynonymous mutations per patient
+
+```{r, message=FALSE, warning=FALSE}
+nonsyn_maf_df <- maf_df_annotated %>%
+  dplyr::filter(Variant_Classification %in% nonsyn_categories) %>% 
+  dplyr::arrange(sample_id)
+
+list_of_nonsyn_mutations <- split(nonsyn_maf_df, nonsyn_maf_df$sample_id)
+
+# Save the nonsyn_maf_df into a file
+nonsyn_maf_out_path <- file.path(results_fip_path, 
+                      "nonsyn_mutations.csv")
+write.csv(nonsyn_maf_df, file = nonsyn_maf_out_path, row.names = TRUE)
+```
+
+# Export info to use Ensembl VEP (web version)
+
+```{r, message=FALSE, warning=FALSE}
+### Extract nonsyn info in correct format for VEP input
+api_input <- nonsyn_maf_df %>% 
+  dplyr::select(Chromosome,
+         Start_position,
+         End_position,
+         ref_allele,
+         alt_allele,
+         Strand,
+         sample_id) %>% 
+  dplyr::mutate(Allele_ref_alt = paste(ref_allele, 
+                                alt_allele, 
+                                sep = "/")) %>% 
+  dplyr::mutate(API_info = paste(Chromosome,
+                          Start_position,
+                          End_position,
+                          Allele_ref_alt,
+                          Strand,
+                          sample_id,
+                          sep = " "))
+
+### Export the info to a file and use the Web VEP
+vep_input_data <- "../../data/vep_input_nonsyn_grch37.txt"
+vep_file_path <- file.path(current_dir, 
+                      vep_input_data)
+write.table(api_input$API_info, file = vep_file_path, row.names = FALSE, col.names = FALSE, quote = FALSE)
+```
+
+# Run VEP and explore output
+
+```{r, message=FALSE, warning=FALSE}
+### Define path
+vep_out_data <- "../../data/vep_output_nonsyn_grch37_05.txt"
+vep_path <- file.path(current_dir,
+                      vep_out_data)
+
+### Read data
+vep_df <- read.csv(vep_path, header = TRUE, sep = "\t")
+
+### Clean and wrangle
+vep_df_clean <- vep_df %>% 
+  dplyr::mutate(across(everything(), ~na_if(., "-"))) %>% 
+  dplyr::select(where(~any(!is.na(.)))) %>% 
+  dplyr::rename(sample_id = X.Uploaded_variation,
+         ensembl_id = Gene) %>% 
+  dplyr::mutate(
+    SIFT_cleaned = str_extract(SIFT, "^[^(]+"), 
+    PolyPhen_cleaned = str_extract(PolyPhen, "^[^(]+"),
+    Liberal_consequence = case_when(
+      SIFT_cleaned %in% c("deleterious", "deleterious_low_confidence") | 
+      PolyPhen_cleaned %in% c("probably_damaging", "possibly_damaging") ~ "deleterious",
+      TRUE ~ "non-deleterious"
+    )
+  )
+```
+
+The columns that **do not have any information** are: `r toString(setdiff(colnames(vep_df), colnames(vep_df_clean)))`
+
+# Get a list of LoF mutations per patient
+
+```{r, message=FALSE, warning=FALSE}
+lof_vep_df <- vep_df_clean %>%
+  dplyr::filter(Liberal_consequence == "deleterious") %>% 
+  dplyr::arrange(sample_id)
+
+list_of_lof_mutations <- split(lof_vep_df, lof_vep_df$sample_id)
+
+# Save the lof_vep_df into a file
+lof_vep_out_path <- file.path(results_fip_path, 
+                      "lof_mutations.csv")
+write.csv(lof_vep_df, file = lof_vep_out_path, row.names = TRUE)
+```
+
+# Calculate TMB per patient
+
+```{r, message=FALSE, warning=FALSE}
+# Step 1: Define the size of the sequenced region (in Mb)
+sequenced_region_size_mb <- 25840698/1000000 # Taken from Ref: https://bmcresnotes.biomedcentral.com/articles/10.1186/s13104-019-4343-8
+
+# Step 2: Filter for non-synonymous mutations based on literature
+tmb_df <- maf_df_annotated %>%
+  dplyr::filter(Variant_Classification %in% nonsyn_categories) %>% 
+  dplyr::group_by(sample_id) %>%
+  dplyr::summarise(
+    total_mutations = n(),  # Count mutations for each sample
+    TMB = total_mutations / sequenced_region_size_mb  # Calculate TMB
+  ) %>%
+  dplyr::mutate(TMB_class = case_when( # Define TMB class based on literature: 10 mut/Mb = High
+    TMB >= 10 ~ "High",
+    TMB < 10 ~ "Low")
+  ) %>% 
+  dplyr::arrange(desc(TMB)) # Arrange by TMB in descending order
+
+# View the TMB for each sample/patient
+datatable(tmb_df, 
+          extensions = 'Buttons', 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Number of mutations and (non-synonymous) TMB per patient"
+        )
+```
+
+# Create binary matrices (Nonsyn and LoF)
+
+```{r, message=FALSE, warning=FALSE}
+# ### Nonsyn df
+# nonsyn_binary <- nonsyn_maf_df %>%
+#   mutate(Liberal_consequence_binary = ifelse(Liberal_consequence == "deleterious", 1, 0)) %>%
+#   select(sample_id, Gene, SYMBOL, Liberal_consequence_binary) %>% 
+#   distinct() %>% 
+#   group_by(Gene, SYMBOL) %>%
+#   pivot_wider(names_from = sample_id,
+#               values_from = Liberal_consequence_binary,
+#               values_fill = list(Liberal_consequence_binary = 0))  # Correctly fills missing values with 0
+# 
+# # Save the lof_binary into a file
+# lof_binary_out_path <- file.path(current_dir, 
+#                       "../../data/lof_binary.csv")
+# write.csv(lof_binary, file = lof_binary_out_path, row.names = TRUE)
+# 
+# head(lof_binary)
+
+### LoF df
+lof_binary <- lof_vep_df %>%
+  dplyr::mutate(Liberal_consequence_binary = ifelse(Liberal_consequence == "deleterious", 1, 0)) %>%
+  dplyr::select(sample_id, ensembl_id, SYMBOL, Liberal_consequence_binary) %>% 
+  dplyr::distinct() %>% 
+  dplyr::group_by(ensembl_id, SYMBOL) %>%
+  pivot_wider(names_from = sample_id,
+              values_from = Liberal_consequence_binary,
+              values_fill = list(Liberal_consequence_binary = 0))  # Correctly fills missing values with 0
+
+# Save the lof_binary into a file
+lof_binary_out_path <- file.path(results_fip_path, 
+                      "lof_binary.csv")
+write.csv(lof_binary, file = lof_binary_out_path, row.names = TRUE)
+
+head(lof_binary)
+```
+
+# Plots
+
+## Summary bar plot of Nonsynonymous mutations
+
+```{r, message=FALSE, warning=FALSE}
+# Define output path
+nonsyn_plot_path <- file.path(figures_path, 
+                              "nonsyn_plot.png")
+
+# Count the occurrences of each unique value in Variant_Classification
+top_variants <- nonsyn_maf_df %>%
+  count(Variant_Classification, name = "frequency") %>%
+  mutate(true_frequency = frequency / sum(frequency)) %>% 
+  arrange(desc(true_frequency))
+
+# Create a bar plot
+nonsyn_plot <- ggplot(top_variants, aes(x = reorder(Variant_Classification,
+                                                    -true_frequency), 
+                                     y = true_frequency, 
+                                     fill = Variant_Classification)) +
+  geom_bar(stat = "identity") +
+  scale_fill_brewer(palette = "Set1") +  # Use a color palette from RColorBrewer
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", colour = "black"), # Set background to white with grey border
+    panel.grid.major = element_line(color = "grey", linewidth = 0.5),  # Adjust major gridlines
+    panel.grid.minor = element_blank(),  # Hide minor gridlines for a cleaner look
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),  # Tilt x-axis labels
+    plot.background = element_rect(fill = "white", colour = NA)  # Set plot background to white
+  ) +
+  labs(title = "Nonsynonymous mutations' frequency",
+       x = "Variant Classification", 
+       y = "Relative Frequency") +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.1))  # Set y-axis breaks every 0.1
+
+# Print plot
+print(nonsyn_plot)
+
+# Save plot
+ggsave(nonsyn_plot_path, nonsyn_plot, width = 10, height = 8, dpi = 300)
+```
+
+## SIFT summary bar plot of LoF mutations
+
+```{r, message=FALSE, warning=FALSE}
+# Define output path
+lof_SIFT_plot_path <- file.path(figures_path, 
+                           "lof_SIFT_plot.png")
+
+# Count the occurrences of each unique value in Consequence and calculate the true frequency
+top_SIFT_lof_variants <- lof_vep_df %>%
+  count(SIFT_cleaned, name = "frequency") %>%
+  mutate(true_frequency = frequency / sum(frequency)) %>%
+  arrange(desc(true_frequency)) %>%
+  slice_max(order_by = true_frequency, n = 5)
+
+# Create a bar plot with the true frequency
+lof_SIFT_plot <- ggplot(top_SIFT_lof_variants, aes(x = reorder(SIFT_cleaned, 
+                                                     -true_frequency), 
+                                                   y = true_frequency, 
+                                                   fill = SIFT_cleaned)) +
+  geom_bar(stat = "identity") +
+  scale_fill_brewer(palette = "Set1") +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", colour = "black"),
+    panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+    plot.background = element_rect(fill = "white", colour = NA)
+  ) +
+  labs(title = "Top 5 Most Frequent SIFT LoF Consequences (Relative Frequency)",
+       x = "SIFT Consequence", 
+       y = "Relative Frequency") +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.1))  # Set y-axis breaks every 0.1
+
+# Print plot
+print(lof_SIFT_plot)
+
+# Save plot
+ggsave(lof_SIFT_plot_path, lof_SIFT_plot, width = 10, height = 8, dpi = 300)
+```
+
+## PolyPhen summary bar plot of LoF mutations
+
+```{r, message=FALSE, warning=FALSE}
+# Define output path
+lof_PolyPhen_plot_path <- file.path(figures_path, 
+                           ".lof_PolyPhen_plot.png")
+
+# Count the occurrences of each unique value in Consequence and calculate the true frequency
+top_PolyPhen_lof_variants <- lof_vep_df %>%
+  count(PolyPhen_cleaned, name = "frequency") %>%
+  mutate(true_frequency = frequency / sum(frequency)) %>%
+  arrange(desc(true_frequency)) %>%
+  slice_max(order_by = true_frequency, n = 5)
+
+# Create a bar plot with the true frequency
+lof_PolyPhen_plot <- ggplot(top_PolyPhen_lof_variants, aes(x = reorder(PolyPhen_cleaned, 
+                                                     -true_frequency), 
+                                                   y = true_frequency, 
+                                                   fill = PolyPhen_cleaned)) +
+  geom_bar(stat = "identity") +
+  scale_fill_brewer(palette = "Set1") +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", colour = "black"),
+    panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+    plot.background = element_rect(fill = "white", colour = NA)
+  ) +
+  labs(title = "Top 5 Most Frequent PolyPhen LoF Consequences (Relative Frequency)",
+       x = "PolyPhen Consequence", 
+       y = "Relative Frequency") +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.1))  # Set y-axis breaks every 0.1
+
+# Print plot
+print(lof_PolyPhen_plot)
+
+# Save plot
+ggsave(lof_PolyPhen_plot_path, lof_PolyPhen_plot, width = 10, height = 8, dpi = 300)
+```
+
+## Box plot of TMB grouped by response
+
+```{r, message=FALSE, warning=FALSE}
+# Merge sup1_response with tmb_df
+tmb_response_df <- tmb_df %>% 
+  left_join(sup1_response_df %>% 
+            dplyr::select(Sample.ID, Patient.Response),
+            by = c("sample_id" = "Sample.ID")
+  ) %>% 
+  dplyr::select(sample_id,
+         TMB,
+         patient_response = Patient.Response)
+
+# Define output path
+tmb_boxplot_path <- file.path(figures_path, 
+                           "tmb_boxplot.png")
+
+# Create a boxplot
+tmb_boxplot <- ggplot(tmb_response_df, aes(x = patient_response, 
+                                           y = TMB, 
+                                           fill = patient_response)) +
+  geom_boxplot() +
+  scale_fill_brewer(palette = "Set1") +
+  scale_x_discrete(labels = c("NR" = "Non-responders", 
+                              "R" = "Responders")) +  # Manually set x-axis labels
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", colour = "black"),
+    panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+    plot.background = element_rect(fill = "white", colour = NA)
+  ) +
+  labs(title = "TMB by Patient Response",
+       x = "Patient Response",
+       y = "Tumor Mutational Burden (TMB)")
+
+# Print plot
+print(tmb_boxplot)
+
+# Save plot
+ggsave(tmb_boxplot_path, tmb_boxplot, width = 10, height = 8, dpi = 300)
+```
+
+# MAFtools
+
+## Loading data
+
+```{r, message=FALSE, warning=FALSE}
+library(maftools)
+
+# Define paths
+maf_data <- "../../data/_raw/41467_2017_1460_MOESM6_ESM_somatic_mutations.xlsx"
+maf_path <- file.path(current_dir, 
+                      maf_data)
+clinical_data <- "../../data/_raw/41467_2017_1460_MOESM4_ESM_clinical.xlsx"
+clinical_path <- file.path(current_dir, 
+                      clinical_data)
+
+# Read data
+maf_df <- read_excel(maf_path,
+                        skip=1,
+                        col_names=TRUE) %>% 
+  mutate(sample_id = sub("_[12]$", "", tumor_name)) %>% 
+  dplyr::select(sample_id, everything()) %>% 
+  arrange(sample_id)
+  
+clinical_df <- read_excel(clinical_path,
+                          skip=1,
+                          col_names=TRUE)
+colnames(clinical_df)[1] <- "sample_id"
+
+# Add Tumor_Sample_Barcode to clinical_df
+mapping_df <- maf_df_annotated %>%
+  dplyr::select(sample_id, Tumor_Sample_Barcode) %>%
+  distinct()
+
+clinical_df <- clinical_df %>%
+  left_join(mapping_df, by = "sample_id")
+
+# Load maf with clinical data
+mm909 = read.maf(maf = maf_df, clinicalData = clinical_df)
+```
+
+## Summaries
+
+```{r, message=FALSE, warning=FALSE}
+## Shows sample summry.
+getSampleSummary(mm909)
+
+## Shows gene summary.
+getGeneSummary(mm909)
+
+## Shows clinical data associated with samples
+getClinicalData(mm909)
+
+## Shows all fields in MAF
+getFields(mm909)
+
+## Writes maf summary to an output file with basename mm909
+write.mafSummary(maf = mm909, basename = file.path(results_fip_path, 'mm909'))
+```
+
+## Visualization
+
+```{r, message=FALSE, warning=FALSE}
+plotmafSummary(maf = mm909, rmOutlier = TRUE, addStat = 'median', dashboard = TRUE, titvRaw = FALSE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+# Oncoplot for top ten mutated genes.
+oncoplot(maf = mm909, top = 20)
+```
+
+```{r, message=FALSE, warning=FALSE}
+mm909.titv = titv(maf = mm909, plot = FALSE, useSyn = TRUE)
+# Plot titv summary
+plotTiTv(res = mm909.titv)
+```
+
+```{r, message=FALSE, warning=FALSE}
+mm909.mutload = tcgaCompare(maf = mm909, cohortName = 'Example-mm909', logscale = TRUE, capture_size = 50)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

@@ -13,6 +13,9 @@ if (!require("tidyverse")) {
 if (!require("dplyr")) {
   install.packages("dplyr")
 }
+if (!require("purrr")) {
+  install.packages("purrr")
+}
 if (!require("knitr")) {
   install.packages("knitr")
 }
@@ -35,8 +38,10 @@ if (!requireNamespace("BiocManager", quietly = TRUE)) {
   install.packages("BiocManager")
 }
 BiocManager::install("VariantAnnotation")
-BiocManager::install("biomaRt")
+# BiocManager::install("biomaRt")
 BiocManager::install("maftools")
 BiocManager::install("GSEABase")
-BiocManager::install("EnsDb.Hsapiens.v75")
+# BiocManager::install("EnsDb.Hsapiens.v75") # From Ensembl
+BiocManager::install("org.Hs.eg.db") # From NCBI Entrez Gene data and other sources
 BiocManager::install("fgsea")
+BiocManager::install("limma")

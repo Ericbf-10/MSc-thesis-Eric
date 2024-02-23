@@ -30,6 +30,10 @@ source(file = "../02_functions.R")
 ### Define paths
 current_dir <- getwd()
 
+# Results
+results_pc_path <- file.path(current_dir,
+                              "../../results/output/patient_characteristics")
+
 # Sup1
 sup1_data <- "../../data/_raw/41467_2017_1460_MOESM4_ESM_clinical.xlsx"
 sup1_path <- file.path(current_dir,
@@ -91,8 +95,8 @@ sup1_final <- sup1_response %>%
   )
 
 # Save the sup1_final into a file
-sup1_out_path <- file.path(current_dir,
-                           "../../data/sup1_response.csv")
+sup1_out_path <- file.path(results_pc_path,
+                           "sup1_response.csv")
 write.csv(sup1_final, file = sup1_out_path, row.names = TRUE)
 ```
 
