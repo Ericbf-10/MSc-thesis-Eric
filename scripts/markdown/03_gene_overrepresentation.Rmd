@@ -152,7 +152,7 @@ write.csv(fora_results_lof_df,
           row.names = TRUE)
 ```
 
-### Visualization: Example with Immune-related bioprocesses of MM909_03
+### Visualization: Example with Immune-related bioprocesses of MM909_03 (LoF)
 
 ```{r, message=FALSE, warning=FALSE}
 # Define output path
@@ -200,6 +200,42 @@ print(top_immune_bp_plot)
 
 # Save plot
 ggsave(mm909_03_immune_bp_plot_path, top_immune_bp_plot, width = 10, height = 8, dpi = 300)
+```
+
+### Visualization: Example of Top C5 BP across samples stratified by response (All mutations)
+
+```{r, message=FALSE, warning=FALSE}
+# Define output path
+mm909_all_plot_path <- file.path(figures_path,
+                              "mm909_all_plot.png")
+
+mm909_all_plot <- plot_top5(response_df, fora_results_all_list, mm909_all_plot_path, "FORA example with top C5 BP across samples (All mutations)", "Top C5 BP Gene Sets")
+
+print(mm909_all_plot)
+```
+
+### Visualization: Example of Top C5 BP across samples stratified by response (Nonsyn mutations)
+
+```{r, message=FALSE, warning=FALSE}
+# Define output path
+mm909_nonsyn_plot_path <- file.path(figures_path,
+                              "mm909_nonsyn_plot.png")
+
+mm909_nonsyn_plot <- plot_top5(response_df, fora_results_nonsyn_list, mm909_nonsyn_plot_path, "FORA example with top C5 BP across samples (Nonsyn mutations)", "Top C5 BP Gene Sets")
+
+print(mm909_nonsyn_plot)
+```
+
+### Visualization: Example of Top C5 BP across samples stratified by response (LoF mutations)
+
+```{r, message=FALSE, warning=FALSE}
+# Define output path
+mm909_lof_plot_path <- file.path(figures_path,
+                              "mm909_lof_plot.png")
+
+mm909_lof_plot <- plot_top5(response_df, fora_results_lof_list, mm909_lof_plot_path, "FORA example with top C5 BP across samples (LoF mutations)", "Top C5 BP Gene Sets")
+
+print(mm909_lof_plot)
 ```
 
 ## Second analysis using H
@@ -272,71 +308,40 @@ write.csv(fora_results_h_lof_df,
           row.names = TRUE)
 ```
 
-### Visualization: Example with top H across samples
+### Visualization: Example of Top H across samples stratified by response (All mutations)
 
 ```{r, message=FALSE, warning=FALSE}
 # Define output path
-mm909_h_plot_path <- file.path(figures_path,
-                              "mm909_h_plot.png")
+mm909_all_h_plot_path <- file.path(figures_path,
+                              "mm909_all_h_plot.png")
 
-# Prepare data for all samples in the list
-prepared_data_list <- lapply(names(fora_results_h_lof_list), function(sample_id) {
-  fora_results_h_lof_list[[sample_id]] %>%
-    dplyr::mutate(Gene_ratio = overlap / size,
-           Count = overlap,
-           sample_id = sample_id) %>%
-    dplyr::slice_min(order_by = padj, n = 5) %>%
-    dplyr::arrange(desc(Gene_ratio))
-})
+mm909_h_all_plot <- plot_top5(response_df, fora_results_h_all_list, mm909_all_h_plot_path, "FORA example with top H across samples (All mutations)", "Top H Gene Sets")
 
-# Combine all prepared datasets into one
-combined_data <- bind_rows(prepared_data_list)
+print(mm909_h_all_plot)
+```
 
-# Merge response info
-combined_data <- combined_data %>% 
-  dplyr::left_join(response_df, by = "sample_id")
+### Visualization: Example of Top H across samples stratified by response (Nonsyn mutations)
 
-# Step 1: Create an ordered factor for sample_id based on patient_response
-# First, create a mapping of sample_id to patient_response
-response_order <- combined_data %>%
-  dplyr::select(sample_id, patient_response) %>%
-  dplyr::distinct() %>%
-  dplyr::arrange(patient_response, sample_id) # Arrange so that "R" comes before "NR"
+```{r, message=FALSE, warning=FALSE}
+# Define output path
+mm909_nonsyn_h_plot_path <- file.path(figures_path,
+                              "mm909_nonsyn_h_plot.png")
 
-# Use this ordering to reorder sample_id in the combined data
-combined_data$sample_id <- factor(combined_data$sample_id,
-                                  levels = response_order$sample_id)
+mm909_h_nonsyn_plot <- plot_top5(response_df, fora_results_h_nonsyn_list, mm909_nonsyn_h_plot_path, "FORA example with top H across samples (Nonsyn mutations)", "Top H Gene Sets")
 
-# Step 2: Plot with ordered sample_id and facets to distinguish "R" and "NR"
-mm909_h_plot <- ggplot(combined_data, aes(x = sample_id, 
-                                          y = reorder(pathway, Gene_ratio),
-                                          size = Gene_ratio,
-                                          color = padj)) +
-  geom_point() +
-  scale_color_gradient(low = "blue", high = "red") +
-  facet_grid(. ~ patient_response, scales = "free_x", space = "free_x") + # Facets for "R" and "NR"
-  theme_minimal() +
-  theme(
-    panel.background = element_rect(fill = "white", colour = "black"),
-    panel.grid.major = element_line(color = "grey", linewidth = 0.5),
-    panel.grid.minor = element_blank(),
-    plot.background = element_rect(fill = "white", colour = NA),
-    legend.position = "right",
-    axis.text.x = element_text(angle = 45, hjust = 1) # Tilt x labels 45 degrees
-  ) +
-  labs(title = "FORA example with top H across samples",
-       x = "Sample ID", 
-       y = "Top H Gene Sets",
-       color = "p.adjust",
-       size = "Gene Ratio") +
-  guides(color = guide_colorbar(title = "p.adjust"), 
-         size = guide_legend(title = "Gene Ratio"))
+print(mm909_h_nonsyn_plot)
+```
 
-# Print plot
-print(mm909_h_plot)
+### Visualization: Example of Top H across samples stratified by response (LoF mutations)
 
-# Save plot
-ggsave(mm909_h_plot_path, mm909_h_plot, width = 12, height = 8, dpi = 300)
+```{r, message=FALSE, warning=FALSE}
+# Define output path
+mm909_lof_h_plot_path <- file.path(figures_path,
+                              "mm909_lof_h_plot.png")
+
+mm909_h_lof_plot <- plot_top5(response_df, fora_results_h_lof_list, mm909_lof_h_plot_path, "FORA example with top H across samples (LoF mutations)", "Top H Gene Sets")
+
+print(mm909_h_lof_plot)
 ```
 
 ### Visualization: Example with Hallmark_apoptosis R vs NR
@@ -357,37 +362,47 @@ h_apoptosis <- fora_results_response_h_lof_df %>%
   dplyr::rename(Count = overlap) %>%
   dplyr::arrange(desc(patient_response))
 
-# Modify the ggplot call to include shape based on patient_response
-h_apoptosis_plot <- ggplot(h_apoptosis, aes(x = Gene_ratio, 
-                                            y = reorder(sample_id, Gene_ratio),
-                                            size = Count,
-                                            color = padj,
-                                            shape = patient_response)) + # Add shape aesthetic for patient_response
+# Step 1: Create an ordered factor for sample_id based on patient_response
+# First, create a mapping of sample_id to patient_response
+response_order <- h_apoptosis %>%
+  dplyr::select(sample_id, patient_response) %>%
+  dplyr::distinct() %>%
+  dplyr::arrange(patient_response, sample_id) # Arrange so that "R" comes before "NR"
+
+# Use this ordering to reorder sample_id in the combined data
+h_apoptosis$sample_id <- factor(h_apoptosis$sample_id,
+                                  levels = response_order$sample_id)
+
+# Step 2: Plot with ordered sample_id and facets to distinguish "R" and "NR"
+mm909_h_apoptosis_plot <- ggplot(h_apoptosis, aes(x = sample_id, 
+                                          y = reorder(pathway, Gene_ratio),
+                                          size = Gene_ratio,
+                                          color = padj)) +
   geom_point() +
   scale_color_gradient(low = "blue", high = "red") +
-  scale_shape_manual(values = c("R" = 17, "NR" = 16)) + # Define specific shapes for "R" and "NR"
+  facet_grid(. ~ patient_response, scales = "free_x", space = "free_x") + # Facets for "R" and "NR"
   theme_minimal() +
   theme(
     panel.background = element_rect(fill = "white", colour = "black"),
     panel.grid.major = element_line(color = "grey", linewidth = 0.5),
     panel.grid.minor = element_blank(),
     plot.background = element_rect(fill = "white", colour = NA),
-    legend.position = "right"
+    legend.position = "right",
+    axis.text.x = element_text(angle = 45, hjust = 1) # Tilt x labels 45 degrees
   ) +
-  labs(title = "FORA example with hallmark apoptosis R vs NR",
-       x = "Gene Ratio", 
-       y = "Sample ID",
+  labs(title = "FORA example with H APOPTOSIS across samples",
+       x = "Sample ID", 
+       y = "H APOPTOSIS Gene Set",
        color = "p.adjust",
-       size = "Count",
-       shape = "Patient Response") + # Add shape to legend
+       size = "Gene Ratio") +
   guides(color = guide_colorbar(title = "p.adjust"), 
-         size = guide_legend(title = "Count"))
+         size = guide_legend(title = "Gene Ratio"))
 
 # Print plot
-print(h_apoptosis_plot)
+print(mm909_h_apoptosis_plot)
 
 # Save plot
-ggsave(mm909_h_apoptosis_plot_path, h_apoptosis_plot, width = 10, height = 8, dpi = 300)
+ggsave(mm909_h_apoptosis_plot_path, mm909_h_apoptosis_plot, width = 12, height = 8, dpi = 300)
 ```
 
 # Session Info

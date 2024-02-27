@@ -83,3 +83,73 @@ ENTREZtoENSEMBL <- function(x){
     }
   return(vec)
 }
+
+# Plot top 5 Gene Sets across samples stratified by response
+plot_top5 <- function(response_df, mut_list, plot_path, fig_title, fig_y_label) {
+  
+  # Prepare data for all samples in the list: Filter padjust < 0.5 & calculate Gene ratio per sample from a mut_list
+  prepared_data_list <- lapply(names(mut_list), function(sample_id) {
+    mut_list[[sample_id]] %>%
+      dplyr::filter(padj < 0.05) %>% 
+      dplyr::mutate(Gene_ratio = overlap / size,
+                    Count = overlap,
+                    sample_id = sample_id) %>%
+      dplyr::slice_min(order_by = padj, n = 5) %>%
+      dplyr::arrange(desc(Gene_ratio))
+  })
+
+  # Combine all prepared datasets into one
+  combined_data <- bind_rows(prepared_data_list)
+
+  # Merge response info
+  combined_data <- combined_data %>%
+    dplyr::left_join(response_df, by = "sample_id")
+
+  # Step 1: Create an ordered factor for sample_id based on patient_response
+  # First, create a mapping of sample_id to patient_response
+  response_order <- combined_data %>%
+    dplyr::select(sample_id, patient_response) %>%
+    dplyr::distinct() %>%
+    dplyr::arrange(patient_response, sample_id) # Arrange so that "R" comes before "NR"
+
+  # Use this ordering to reorder sample_id in the combined data
+  combined_data$sample_id <- factor(combined_data$sample_id,
+                                    levels = response_order$sample_id)
+
+  # Determine dynamic breaks based on quantiles of Gene Ratio
+  gene_ratio_breaks <- quantile(combined_data$Gene_ratio, probs = seq(0, 1, by = 0.5), na.rm = TRUE)
+
+  # Step 2: Plot with ordered sample_id and facets to distinguish "R" and "NR"
+  top5_plot <- ggplot(combined_data, aes(x = sample_id,
+                                              y = reorder(pathway, Gene_ratio),
+                                              size = Gene_ratio,
+                                              color = padj)) +
+    geom_point() +
+    scale_color_gradient(low = "blue", high = "red", trans = "log10",
+                         limits = c(1e-6, 1), oob = scales::oob_squish) +
+    scale_size_continuous(name = "Gene Ratio",
+                          range = c(1, 6),  # Adjust size range to match your preference
+                          breaks = gene_ratio_breaks,  # Define breaks based on "Gene Ratio" distribution
+                          labels = format(gene_ratio_breaks, digits = 1)) +  # Label breaks as needed
+    facet_grid(. ~ patient_response, scales = "free_x", space = "free_x") +
+    theme_minimal() +
+    theme(
+      panel.background = element_rect(fill = "white", colour = "black"),
+      panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+      panel.grid.minor = element_blank(),
+      plot.background = element_rect(fill = "white", colour = NA),
+      legend.position = "right",
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    ) +
+    labs(title = fig_title,
+         x = "Sample ID",
+         y = fig_y_label,
+         color = "p.adjust (log10)") +
+    guides(size = guide_legend(title = "Gene Ratio"))
+
+  # Save plot
+  ggsave(plot_path, top5_plot, width = 12, height = 8, dpi = 300)
+  
+  # Return
+  return(top5_plot)
+}
