@@ -14,34 +14,6 @@ set_lists_to_chars <- function(x) {
   return(y)
 }
 
-# Transform a list of data tables coming from the fora results into a big data.frame maintaining the id
-merge_fora_data_tables_adding_id <- function(data_tables_list) {
-  # Check if input is a list
-  if (!is.list(data_tables_list)) {
-    stop("The input must be a list of data tables or data frames.")
-  }
-  
-  # Iterate over the list to modify each data table
-  modified_list <- lapply(names(data_tables_list), function(id) {
-    # Ensure the element is a data frame or data table
-    if (!is.data.frame(data_tables_list[[id]])) {
-      stop("All elements of the list must be data frames or data tables.")
-    }
-    
-    # Copy the data table to avoid modifying the original list in place
-    dt_copy <- data_tables_list[[id]]
-    # Add a new column with the ID
-    dt_copy$sample_id <- id
-    return(dt_copy)
-  })
-  
-  # Combine all modified data tables into one dataframe
-  combined_df <- do.call(rbind, modified_list)
-  combined_df <- combined_df %>% 
-    mutate(overlapGenes = map_chr(overlapGenes, ~ paste(.x, collapse = ", ")))
-  return(combined_df)
-}
-
 # Convert Hugo Symbols to Entrez IDs
 SYMBOLtoENTREZ <- function(x){
   vec=mapIds(org.Hs.eg.db,
@@ -96,6 +68,47 @@ SYMBOLtoENSEMBL <- function(x){
     vec[y]=x[y]
   }
   return(vec)
+}
+
+# Transform a list of data tables coming from the fora results into a big data.frame maintaining the id
+merge_fora_data_tables_adding_id <- function(data_tables_list) {
+  # Check if input is a list
+  if (!is.list(data_tables_list)) {
+    stop("The input must be a list of data tables or data frames.")
+  }
+  
+  # Iterate over the list to modify each data table
+  modified_list <- lapply(names(data_tables_list), function(id) {
+    # Ensure the element is a data frame or data table
+    if (!is.data.frame(data_tables_list[[id]])) {
+      stop("All elements of the list must be data frames or data tables.")
+    }
+    
+    # Copy the data table to avoid modifying the original list in place
+    dt_copy <- data_tables_list[[id]]
+    # Add a new column with the ID
+    dt_copy$sample_id <- id
+    return(dt_copy)
+  })
+  
+  # Combine all modified data tables into one dataframe
+  combined_df <- do.call(rbind, modified_list)
+  combined_df <- combined_df %>% 
+    mutate(overlapGenes = map_chr(overlapGenes, ~ paste(.x, collapse = ", ")))
+  return(combined_df)
+}
+
+# Filter for ubiquitin genes in a mutation list
+ubiquitin_filter <- function(mut_list, ubiquitin_df){
+  filtered_list <- lapply(names(mut_list), function(sample_id) {
+    mut_list[[sample_id]] %>%
+      dplyr::inner_join(ubiquitin_df, by = "ensembl_id")
+  })
+  
+  # Set the names of the list elements to be the sample_id
+  names(filtered_list) <- names(mut_list)
+  
+  return(filtered_list)
 }
 
 # Perform FORA analysis for a specific Human Gene Set collection
@@ -178,7 +191,7 @@ plot_top5 <- function(response_df, mut_df, plot_path, fig_title, fig_y_label) {
 
   # Determine dynamic breaks based on quantiles of Gene Ratio
   gene_ratio_breaks <- quantile(combined_data$Gene_ratio, probs = seq(0, 1, by = 0.5), na.rm = TRUE)
-
+  
   # Step 2: Plot with ordered sample_id and facets to distinguish "R" and "NR"
   top5_plot <- ggplot(combined_data, aes(x = sample_id,
                                               y = reorder(pathway, Gene_ratio),
@@ -190,7 +203,7 @@ plot_top5 <- function(response_df, mut_df, plot_path, fig_title, fig_y_label) {
     scale_size_continuous(name = "Gene Ratio",
                           range = c(1, 6),  # Adjust size range to match your preference
                           breaks = gene_ratio_breaks,  # Define breaks based on "Gene Ratio" distribution
-                          labels = format(gene_ratio_breaks, digits = 1)) +  # Label breaks as needed
+                          labels = format(gene_ratio_breaks, digits = 2)) +  # Label breaks as needed
     facet_grid(. ~ patient_response, scales = "free_x", space = "free_x") +
     theme_minimal() +
     theme(

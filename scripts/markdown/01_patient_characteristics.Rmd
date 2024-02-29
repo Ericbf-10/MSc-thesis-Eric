@@ -32,7 +32,7 @@ current_dir <- getwd()
 
 # Results
 results_pc_path <- file.path(current_dir,
-                              "../../results/output/patient_characteristics")
+                              "../../results/patient_characteristics/output")
 
 # Sup1
 sup1_data <- "../../data/_raw/41467_2017_1460_MOESM4_ESM_clinical.xlsx"

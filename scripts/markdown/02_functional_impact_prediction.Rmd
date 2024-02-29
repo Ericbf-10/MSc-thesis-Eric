@@ -41,11 +41,11 @@ current_dir <- getwd()
 
 # Results
 results_pc_path <- file.path(current_dir,
-                              "../../results/output/patient_characteristics")
+                              "../../results/patient_characteristics/output")
 results_fip_path <- file.path(current_dir,
-                              "../../results/output/somatic_mutation_analysis/functional_impact_prediction")
+                              "../../results/somatic_mutation_analysis/functional_impact_prediction/output")
 figures_path <- file.path(current_dir, 
-                                 "../../results/figures")
+                                 "../../results/somatic_mutation_analysis/functional_impact_prediction/figures")
 
 # MAF-like file
 maf_data <- "../../data/_raw/41467_2017_1460_MOESM6_ESM_somatic_mutations.xlsx"

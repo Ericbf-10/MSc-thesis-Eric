@@ -1,0 +1,662 @@
+---
+title: "Impact of dysfunctional ubiquitination in response to cancer immunotherapy"
+subtitle: <center> Somatic mutations analysis - Ubiquitin Gene Overrepresentation Analysis </center>
+author: "Eric Bautista Farrerons (s212514)"
+date: '`r paste("First created on January 2024. Updated on ", format(Sys.Date(), "%d %B %Y"))`'
+output:
+  html_document:
+    css: style.css
+    code_folding: hide
+    fig_caption: yes
+    toc: yes
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    toc_depth: 4
+    number_sections: true
+---
+
+# Load data
+
+```{r, message=FALSE}
+### Load required libraries
+library(readxl)
+library(tidyverse)
+library(purrr)
+library(dplyr)
+library(knitr)
+library(DT)
+library(httr)
+library(jsonlite)
+library(stringr)
+library(GSEABase)
+library(org.Hs.eg.db)
+
+### Load functions
+source(file = "../02_functions.R")
+
+### Define paths
+current_dir <- getwd()
+data_path <- file.path(current_dir,
+                       "../../data/_raw")
+results_pc_path <- file.path(current_dir,
+                              "../../results/patient_characteristics/output")
+results_fip_path <- file.path(current_dir,
+                              "../../results/somatic_mutation_analysis/functional_impact_prediction/output")
+results_ubgsea_path <- file.path(current_dir, 
+                                 "../../results/somatic_mutation_analysis/ubiquitin_gsea/output")
+figures_path <- file.path(current_dir, 
+                                 "../../results/somatic_mutation_analysis/ubiquitin_gsea/figures")
+
+maf_df_path <- file.path(results_fip_path, "all_mutations.csv") # All mutations df
+nonsyn_df_path <- file.path(results_fip_path, "nonsyn_mutations.csv") # Nonsyn mutations df
+lof_df_path <- file.path(results_fip_path, "lof_mutations.csv") # LoF mutations df
+
+# Sup1 data
+sup1_response_path <- file.path(results_pc_path, 
+                           "sup1_response.csv")
+### Read data & wrangle
+
+# Read 3 lists of mutations
+
+# All
+maf_df_annotated <- read.csv(maf_df_path, header = TRUE)[ , -1]
+list_of_all_mutations <- split(maf_df_annotated, maf_df_annotated$sample_id
+                               )
+# Nonsyn
+nonsyn_df_annotated <- read.csv(nonsyn_df_path, header = TRUE)[ , -1]
+list_of_nonsyn_mutations <- split(nonsyn_df_annotated, nonsyn_df_annotated$sample_id)
+
+# LoF
+lof_df_annotated <- read.csv(lof_df_path, header = TRUE)[ , -1]
+list_of_lof_mutations <- split(lof_df_annotated, lof_df_annotated$sample_id)
+
+# Get the list of patient IDs
+sample_id_list <- unique(maf_df_annotated$sample_id)
+
+## Read sup1_response.csv
+sup1_response_df <- read.csv(sup1_response_path)[ , -1] # Drop first column
+
+# df to merge response info later
+response_df <- sup1_response_df %>% 
+  dplyr::rename(sample_id = Sample.ID,
+                patient_response = Patient.Response) %>% 
+  dplyr::select(sample_id, patient_response)
+
+# Create a list of Responders and Non-responders
+sample_id_lists <- split(sup1_response_df$Sample.ID, 
+                         sup1_response_df$Patient.Response) # Split the "Sample.ID" values into lists based on "Patient.Response"
+
+r_sample_ids <- sample_id_lists$R
+nr_sample_ids <- sample_id_lists$NR
+```
+
+# Filtering lists to only include Ubiquitin-related genes
+
+```{r, message=FALSE, warning=FALSE}
+# Load GMT file as a GeneSetCollection object
+gene_set_collection <- getGmt(file.path(data_path, "ubgenes.gmt"))
+
+# Initialize an empty list to store the results
+gene_sets_list <- list()
+
+# Iterate over each GeneSet in the GeneSetCollection
+for (setName in names(gene_set_collection)) {
+  # Extract the GeneSet by its name
+  geneSet <- gene_set_collection[[setName]]
+
+  # Convert Hugo symbols to Ensembl IDs for this GeneSet
+  ensembl_ids <- SYMBOLtoENSEMBL(geneIds(geneSet))
+
+  # Ensure the result is a character vector of Ensembl Gene IDs
+  ensembl_ids_vector <- as.character(ensembl_ids)
+
+  # Store the converted IDs in the list, associated with the setName
+  gene_sets_list[[setName]] <- ensembl_ids_vector
+}
+
+# Convert the lists into a ubiquitin_df
+ub_genes <- unlist(gene_sets_list) # Step 1: Flatten the list into a single character vector
+ub_genes_unique <- unique(ub_genes) # Step 2: Make the IDs unique
+ubiquitin_df <- data.frame(ensembl_id = ub_genes_unique) # Step 3: Create a dataframe with a single column "ensembl_id"
+
+# Filter for ubiquitin genes in all the mutation lists
+list_of_all_ub_mutations <- ubiquitin_filter(list_of_all_mutations, ubiquitin_df)
+list_of_nonsyn_ub_mutations <- ubiquitin_filter(list_of_nonsyn_mutations, ubiquitin_df)
+list_of_lof_ub_mutations <- ubiquitin_filter(list_of_lof_mutations, ubiquitin_df)
+```
+
+# Pathway analysis (gene overrepresentation)
+
+## First analysis using C5 - BP
+
+```{r, message=FALSE, warning=FALSE}
+# Define paths
+fora_results_all_csv_path <- file.path(results_ubgsea_path, "fora_results_c5bp_all.csv")
+fora_results_nonsyn_csv_path <- file.path(results_ubgsea_path, "fora_results_c5bp_nonsyn.csv")
+fora_results_lof_csv_path <- file.path(results_ubgsea_path, "fora_results_c5bp_lof.csv")
+
+# Perform FORA analysis for C5:BP Gene Sets
+results_list <- perform_fora_analysis(list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C5", subcategory="BP")
+
+# Load fora results
+fora_results_c5bp_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
+fora_results_c5bp_nonsyn_df <- read.csv(fora_results_nonsyn_csv_path, header = TRUE)[ , -1]
+fora_results_c5bp_lof_df <- read.csv(fora_results_lof_csv_path, header = TRUE)[ , -1]
+```
+
+### Visualization: Top C5 BP across samples stratified by response (All mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=5}
+# Define output path
+mm909_c5bp_all_plot_path <- file.path(figures_path,
+                              "mm909_c5bp_all_plot.png")
+
+mm909_c5bp_all_plot <- plot_top5(response_df, fora_results_c5bp_all_df, mm909_c5bp_all_plot_path, "FORA with top C5 BP across samples (All mutations)", "Top C5 BP Gene Sets")
+
+print(mm909_c5bp_all_plot)
+```
+
+### Visualization: Top C5 BP across samples stratified by response (Nonsyn mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=5}
+# Define output path
+mm909_c5bp_nonsyn_plot_path <- file.path(figures_path,
+                              "mm909_c5bp_nonsyn_plot.png")
+
+mm909_c5bp_nonsyn_plot <- plot_top5(response_df, fora_results_c5bp_nonsyn_df, mm909_c5bp_nonsyn_plot_path, "FORA with top C5 BP across samples (Nonsyn mutations)", "Top C5 BP Gene Sets")
+
+print(mm909_c5bp_nonsyn_plot)
+```
+
+### Visualization: Top C5 BP across samples stratified by response (LoF mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=5}
+# Define output path
+mm909_c5bp_lof_plot_path <- file.path(figures_path,
+                              "mm909_c5bp_lof_plot.png")
+
+mm909_c5bp_lof_plot <- plot_top5(response_df, fora_results_c5bp_lof_df, mm909_c5bp_lof_plot_path, "FORA with top C5 BP across samples (LoF mutations)", "Top C5 BP Gene Sets")
+
+print(mm909_c5bp_lof_plot)
+```
+
+## Second analysis using C5 - CC
+
+```{r, message=FALSE, warning=FALSE}
+# Define paths
+fora_results_all_csv_path <- file.path(results_ubgsea_path, "fora_results_c5cc_all.csv")
+fora_results_nonsyn_csv_path <- file.path(results_ubgsea_path, "fora_results_c5cc_nonsyn.csv")
+fora_results_lof_csv_path <- file.path(results_ubgsea_path, "fora_results_c5cc_lof.csv")
+
+# Perform FORA analysis for H Gene Sets
+results_list <- perform_fora_analysis(list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C5", subcategory="CC")
+
+# Load fora results
+fora_results_c5cc_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
+fora_results_c5cc_nonsyn_df <- read.csv(fora_results_nonsyn_csv_path, header = TRUE)[ , -1]
+fora_results_c5cc_lof_df <- read.csv(fora_results_lof_csv_path, header = TRUE)[ , -1]
+```
+
+### Visualization: C5 CC PROTEASOME across samples stratified by response (LoF mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=5}
+# Define output path
+mm909_c5cc_proteasome_lof_plot_path <- file.path(figures_path,
+                              "mm909_c5cc_proteasome_lof_plot.png")
+
+proteasome_genesets = c("GOCC_PROTEASOME_ACCESSORY_COMPLEX", "GOCC_PROTEASOME_COMPLEX", "GOCC_PROTEASOME_CORE_COMPLEX", "GOCC_PROTEASOME_CORE_COMPLEX_ALPHA_SUBUNIT_COMPLEX", "GOCC_PROTEASOME_CORE_COMPLEX_BETA_SUBUNIT_COMPLEX", "GOCC_PROTEASOME_REGULATORY_PARTICLE", "GOCC_PROTEASOME_REGULATORY_PARTICLE_BASE_SUBCOMPLEX", "GOCC_PROTEASOME_REGULATORY_PARTICLE_LID_SUBCOMPLEX")
+
+mm909_c5cc_proteasome_lof_plot <- plot_geneset(proteasome_genesets, response_df, fora_results_c5cc_lof_df, mm909_c5cc_proteasome_lof_plot_path, "FORA with PROTEASOME-related C5 CC Gene Sets across samples (LoF mutations)", "PROTEASOME Gene Sets")
+
+print(mm909_c5cc_proteasome_lof_plot)
+```
+
+## Third analysis using H
+
+```{r, message=FALSE, warning=FALSE}
+# Define paths
+fora_results_all_csv_path <- file.path(results_ubgsea_path, "fora_results_h_all.csv")
+fora_results_nonsyn_csv_path <- file.path(results_ubgsea_path, "fora_results_h_nonsyn.csv")
+fora_results_lof_csv_path <- file.path(results_ubgsea_path, "fora_results_h_lof.csv")
+
+# Perform FORA analysis for H Gene Sets
+results_list <- perform_fora_analysis(list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="H")
+
+# Load fora results
+fora_results_h_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
+fora_results_h_nonsyn_df <- read.csv(fora_results_nonsyn_csv_path, header = TRUE)[ , -1]
+fora_results_h_lof_df <- read.csv(fora_results_lof_csv_path, header = TRUE)[ , -1]
+```
+
+### Visualization: Top H across samples stratified by response (All mutations)
+
+Not enough data?
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=5} -->
+<!-- # Define output path -->
+<!-- mm909_h_all_plot_path <- file.path(figures_path, -->
+<!--                               "mm909_all_h_plot.png") -->
+
+<!-- mm909_h_all_plot <- plot_top5(response_df, fora_results_h_all_df, mm909_h_all_plot_path, "FORA with top H across samples (All mutations)", "Top H Gene Sets") -->
+
+<!-- print(mm909_h_all_plot) -->
+<!-- ``` -->
+
+### Visualization: Top H across samples stratified by response (Nonsyn mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=5}
+# Define output path
+mm909_h_nonsyn_plot_path <- file.path(figures_path,
+                              "mm909_nonsyn_h_plot.png")
+
+mm909_h_nonsyn_plot <- plot_top5(response_df, fora_results_h_nonsyn_df, mm909_h_nonsyn_plot_path, "FORA with top H across samples (Nonsyn mutations)", "Top H Gene Sets")
+
+print(mm909_h_nonsyn_plot)
+```
+
+### Visualization: Top H across samples stratified by response (LoF mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=5}
+# Define output path
+mm909_h_lof_plot_path <- file.path(figures_path,
+                              "mm909_lof_h_plot.png")
+
+mm909_h_lof_plot <- plot_top5(response_df, fora_results_h_lof_df, mm909_h_lof_plot_path, "FORA with top H across samples (LoF mutations)", "Top H Gene Sets")
+
+print(mm909_h_lof_plot)
+```
+
+### Visualization: HALLMARK_APOPTOSIS across samples stratified by response (LoF)
+
+```{r, message=FALSE, warning=FALSE, fig.width=15, fig.height=5}
+# Define output path
+mm909_h_apoptosis_plot_path <- file.path(figures_path,
+                              "mm909_h_apoptosis_plot.png")
+
+mm909_h_apoptosis_plot <- plot_geneset(c("HALLMARK_APOPTOSIS"), response_df, fora_results_h_lof_df, mm909_h_apoptosis_plot_path, "FORA with HALLMARK_APOPTOSIS across samples (LoF mutations)", "HALLMARK_APOPTOSIS Gene Set")
+
+print(mm909_h_apoptosis_plot)
+```
+
+## Fourth analysis using C6 (oncogenic)
+
+```{r, message=FALSE, warning=FALSE}
+# Define paths
+fora_results_all_csv_path <- file.path(results_ubgsea_path, "fora_results_c6_all.csv")
+fora_results_nonsyn_csv_path <- file.path(results_ubgsea_path, "fora_results_c6_nonsyn.csv")
+fora_results_lof_csv_path <- file.path(results_ubgsea_path, "fora_results_c6_lof.csv")
+
+# Perform FORA analysis for C6 Gene Sets
+results_list <- perform_fora_analysis(list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C6")
+
+# Load fora results
+fora_results_c6_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
+fora_results_c6_nonsyn_df <- read.csv(fora_results_nonsyn_csv_path, header = TRUE)[ , -1]
+fora_results_c6_lof_df <- read.csv(fora_results_lof_csv_path, header = TRUE)[ , -1]
+```
+
+### Visualization: Top C6 across samples stratified by response (All mutations)
+
+Not enough data
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=5} -->
+<!-- # Define output path -->
+<!-- mm909_c6_all_plot_path <- file.path(figures_path, -->
+<!--                               "mm909_c6_all_plot.png") -->
+
+<!-- mm909_c6_all_plot <- plot_top5(response_df, fora_results_c6_all_df, mm909_c6_all_plot_path, "FORA with top C6 across samples (All mutations)", "Top C6 Gene Sets") -->
+
+<!-- print(mm909_c6_all_plot) -->
+<!-- ``` -->
+
+### Visualization: Top C6 across samples stratified by response (Nonsyn mutations)
+
+Not enough data
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=15, fig.height=20} -->
+<!-- # Define output path -->
+<!-- mm909_c6_nonsyn_plot_path <- file.path(figures_path, -->
+<!--                               "mm909_c6_nonsyn_plot.png") -->
+
+<!-- mm909_c6_nonsyn_plot <- plot_top5(response_df, fora_results_c6_nonsyn_df, mm909_c6_nonsyn_plot_path, "FORA with top C6 across samples (Nonsyn mutations)", "Top C6 Gene Sets") -->
+
+<!-- print(mm909_c6_nonsyn_plot) -->
+<!-- ``` -->
+
+### Visualization: Top C6 across samples stratified by response (LoF mutations)
+
+Not enough data
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=15, fig.height=20} -->
+<!-- # Define output path -->
+<!-- mm909_c6_lof_plot_path <- file.path(figures_path, -->
+<!--                               "mm909_c6_lof_plot.png") -->
+
+<!-- mm909_c6_lof_plot <- plot_top5(response_df, fora_results_c6_lof_df, mm909_c6_lof_plot_path, "FORA with top C6 across samples (LoF mutations)", "Top C6 Gene Sets") -->
+
+<!-- print(mm909_c6_lof_plot) -->
+<!-- ``` -->
+
+## Fifth analysis using C7 (immunologic)
+
+```{r, message=FALSE, warning=FALSE}
+# Define paths
+fora_results_all_csv_path <- file.path(results_ubgsea_path, "fora_results_c7_all.csv")
+fora_results_nonsyn_csv_path <- file.path(results_ubgsea_path, "fora_results_c7_nonsyn.csv")
+fora_results_lof_csv_path <- file.path(results_ubgsea_path, "fora_results_c7_lof.csv")
+
+# Perform FORA analysis for C7 Gene Sets
+results_list <- perform_fora_analysis(list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C7")
+
+# Load fora results
+fora_results_c7_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
+fora_results_c7_nonsyn_df <- read.csv(fora_results_nonsyn_csv_path, header = TRUE)[ , -1]
+fora_results_c7_lof_df <- read.csv(fora_results_lof_csv_path, header = TRUE)[ , -1]
+```
+
+### Visualization: Top C7 across samples stratified by response (All mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=15, fig.height=20}
+# Define output path
+mm909_c7_all_plot_path <- file.path(figures_path,
+                              "mm909_c7_all_plot.png")
+
+mm909_c7_all_plot <- plot_top5(response_df, fora_results_c7_all_df, mm909_c7_all_plot_path, "FORA with top C7 across samples (All mutations)", "Top C7 Gene Sets")
+
+print(mm909_c7_all_plot)
+```
+
+### Visualization: Top C7 across samples stratified by response (Nonsyn mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=15, fig.height=22}
+# Define output path
+mm909_c7_nonsyn_plot_path <- file.path(figures_path,
+                              "mm909_c7_nonsyn_plot.png")
+
+mm909_c7_nonsyn_plot <- plot_top5(response_df, fora_results_c7_nonsyn_df, mm909_c7_nonsyn_plot_path, "FORA with top C7 across samples (Nonsyn mutations)", "Top C7 Gene Sets")
+
+print(mm909_c7_nonsyn_plot)
+```
+
+### Visualization: Top C7 across samples stratified by response (LoF mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=10}
+# Define output path
+mm909_c7_lof_plot_path <- file.path(figures_path,
+                              "mm909_c7_lof_plot.png")
+
+mm909_c7_lof_plot <- plot_top5(response_df, fora_results_c7_lof_df, mm909_c7_lof_plot_path, "FORA with top C7 across samples (LoF mutations)", "Top C7 Gene Sets")
+
+print(mm909_c7_lof_plot)
+```
+
+## Sixth analysis using MSigDB filter of "Ubiquitin"
+
+```{r, message=FALSE, warning=FALSE}
+# Define paths
+fora_results_all_csv_path <- file.path(results_ubgsea_path, "fora_results_ubiquitin_all.csv")
+fora_results_nonsyn_csv_path <- file.path(results_ubgsea_path, "fora_results_ubiquitin_nonsyn.csv")
+fora_results_lof_csv_path <- file.path(results_ubgsea_path, "fora_results_ubiquitin_lof.csv")
+
+# Load GMT file as a GeneSetCollection object
+gene_set_collection <- getGmt(file.path(data_path, "genesets_ubiquitin.v2023.2.Hs.gmt"))
+
+# Initialize an empty list to store the results
+gene_sets_list <- list()
+
+# Iterate over each GeneSet in the GeneSetCollection
+for (setName in names(gene_set_collection)) {
+  # Extract the GeneSet by its name
+  geneSet <- gene_set_collection[[setName]]
+
+  # Convert Hugo symbols to Ensembl IDs for this GeneSet
+  ensembl_ids <- SYMBOLtoENSEMBL(geneIds(geneSet))
+
+  # Ensure the result is a character vector of Ensembl Gene IDs
+  ensembl_ids_vector <- as.character(ensembl_ids)
+
+  # Store the converted IDs in the list, associated with the setName
+  gene_sets_list[[setName]] <- ensembl_ids_vector
+}
+
+# Set names for each element in the list to match the setName
+names(gene_sets_list) <- names(gene_set_collection)
+
+# Perform FORA analysis for Ubiquitin Gene Sets
+results_list <- perform_fora_analysis(list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, gene_sets_list=gene_sets_list)
+
+# Load fora results
+fora_results_ubiquitin_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
+fora_results_ubiquitin_nonsyn_df <- read.csv(fora_results_nonsyn_csv_path, header = TRUE)[ , -1]
+fora_results_ubiquitin_lof_df <- read.csv(fora_results_lof_csv_path, header = TRUE)[ , -1]
+```
+
+### Visualization: Top Ubiquitin GS across samples stratified by response (All mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=10}
+# Define output path
+mm909_ubiquitin_all_plot_path <- file.path(figures_path,
+                              "mm909_ubiquitin_all_plot.png")
+
+mm909_ubiquitin_all_plot <- plot_top5(response_df, fora_results_ubiquitin_all_df, mm909_ubiquitin_all_plot_path, "FORA with top Ubiquitin GS across samples (All mutations)", "Top Ubiquitin Gene Sets")
+
+print(mm909_ubiquitin_all_plot)
+```
+
+### Visualization: Top Ubiquitin GS across samples stratified by response (Nonsyn mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=10}
+# Define output path
+mm909_ubiquitin_nonsyn_plot_path <- file.path(figures_path,
+                              "mm909_ubiquitin_nonsyn_plot.png")
+
+mm909_ubiquitin_nonsyn_plot <- plot_top5(response_df, fora_results_ubiquitin_nonsyn_df, mm909_ubiquitin_nonsyn_plot_path, "FORA with top Ubiquitin GS across samples (Nonsyn mutations)", "Top Ubiquitin Gene Sets")
+
+print(mm909_ubiquitin_nonsyn_plot)
+```
+
+### Visualization: Top Ubiquitin GS across samples stratified by response (LoF mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=10}
+# Define output path
+mm909_ubiquitin_lof_plot_path <- file.path(figures_path,
+                              "mm909_ubiquitin_lof_plot.png")
+
+mm909_ubiquitin_lof_plot <- plot_top5(response_df, fora_results_ubiquitin_lof_df, mm909_ubiquitin_lof_plot_path, "FORA with top Ubiquitin GS across samples (LoF mutations)", "Top Ubiquitin Gene Sets")
+
+print(mm909_ubiquitin_lof_plot)
+```
+
+## Seventh analysis using C2:CGP (chemical & genetic perturbations)
+
+```{r, message=FALSE, warning=FALSE}
+# Define paths
+fora_results_all_csv_path <- file.path(results_ubgsea_path, "fora_results_c2cgp_all.csv")
+fora_results_nonsyn_csv_path <- file.path(results_ubgsea_path, "fora_results_c2cgp_nonsyn.csv")
+fora_results_lof_csv_path <- file.path(results_ubgsea_path, "fora_results_c2cgp_lof.csv")
+
+# Perform FORA analysis for C2_CGP Gene Sets
+results_list <- perform_fora_analysis(list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C2", subcategory="CGP")
+
+# Load fora results
+fora_results_c2cgp_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
+fora_results_c2cgp_nonsyn_df <- read.csv(fora_results_nonsyn_csv_path, header = TRUE)[ , -1]
+fora_results_c2cgp_lof_df <- read.csv(fora_results_lof_csv_path, header = TRUE)[ , -1]
+```
+
+### Visualization: Top C2:CGP across samples stratified by response (All mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=5}
+# Define output path
+mm909_c2cgp_all_plot_path <- file.path(figures_path,
+                              "mm909_c2cgp_all_plot.png")
+
+mm909_c2cgp_all_plot <- plot_top5(response_df, fora_results_c2cgp_all_df, mm909_c2cgp_all_plot_path, "FORA with top C2:CGP across samples (All mutations)", "Top C2:CGP Gene Sets")
+
+print(mm909_c2cgp_all_plot)
+```
+
+### Visualization: Top C2:CGP across samples stratified by response (Nonsyn mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=5}
+# Define output path
+mm909_c2cgp_nonsyn_plot_path <- file.path(figures_path,
+                              "mm909_c2cgp_nonsyn_plot.png")
+
+mm909_c2cgp_nonsyn_plot <- plot_top5(response_df, fora_results_c2cgp_nonsyn_df, mm909_c2cgp_nonsyn_plot_path, "FORA with top C2:CGP across samples (Nonsyn mutations)", "Top C2:CGP Gene Sets")
+
+print(mm909_c2cgp_nonsyn_plot)
+```
+
+### Visualization: Top C2:CGP across samples stratified by response (LoF mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=5}
+# Define output path
+mm909_c2cgp_lof_plot_path <- file.path(figures_path,
+                              "mm909_c2cgp_lof_plot.png")
+
+mm909_c2cgp_lof_plot <- plot_top5(response_df, fora_results_c2cgp_lof_df, mm909_c2cgp_lof_plot_path, "FORA with top C2:CGP across samples (LoF mutations)", "Top C2:CGP Gene Sets")
+
+print(mm909_c2cgp_lof_plot)
+```
+
+## Eighth analysis using C2:CP:KEGG_MEDICUS
+
+```{r, message=FALSE, warning=FALSE}
+# Define paths
+fora_results_all_csv_path <- file.path(results_ubgsea_path, "fora_results_keggmed_all.csv")
+fora_results_nonsyn_csv_path <- file.path(results_ubgsea_path, "fora_results_keggmed_nonsyn.csv")
+fora_results_lof_csv_path <- file.path(results_ubgsea_path, "fora_results_keggmed_lof.csv")
+
+# Load GMT file as a GeneSetCollection object
+gene_set_collection <- getGmt(file.path(data_path, "c2.cp.kegg_medicus.v2023.2.Hs.entrez.gmt"))
+
+# Initialize an empty list to store the results
+gene_sets_list <- list()
+
+# Iterate over each GeneSet in the GeneSetCollection
+for (setName in names(gene_set_collection)) {
+  # Extract the GeneSet by its name
+  geneSet <- gene_set_collection[[setName]]
+
+  # Convert Entrez IDs to Ensembl IDs for this GeneSet
+  ensembl_ids <- ENTREZtoENSEMBL(geneIds(geneSet))
+
+  # Ensure the result is a character vector of Ensembl Gene IDs
+  ensembl_ids_vector <- as.character(ensembl_ids)
+
+  # Store the converted IDs in the list, associated with the setName
+  gene_sets_list[[setName]] <- ensembl_ids_vector
+}
+
+# Set names for each element in the list to match the setName
+names(gene_sets_list) <- names(gene_set_collection)
+
+# Perform FORA analysis for KEGG_MEDICUS Gene Sets
+results_list <- perform_fora_analysis(list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, gene_sets_list=gene_sets_list)
+
+# Load fora results
+fora_results_keggmed_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
+fora_results_keggmed_nonsyn_df <- read.csv(fora_results_nonsyn_csv_path, header = TRUE)[ , -1]
+fora_results_keggmed_lof_df <- read.csv(fora_results_lof_csv_path, header = TRUE)[ , -1]
+```
+
+### Visualization: Top C2:CP:KEGG_MEDICUS across samples stratified by response (All mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=5}
+# Define output path
+mm909_keggmed_all_plot_path <- file.path(figures_path,
+                              "mm909_keggmed_all_plot.png")
+
+mm909_keggmed_all_plot <- plot_top5(response_df, fora_results_keggmed_all_df, mm909_keggmed_all_plot_path, "FORA with top C2:CP:KEGG_MEDICUS across samples (All mutations)", "Top C2:CP:KEGG_MEDICUS Gene Sets")
+
+print(mm909_keggmed_all_plot)
+```
+
+### Visualization: Top C2:CP:KEGG_MEDICUS across samples stratified by response (Nonsyn mutations)
+
+Not enough data
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=5} -->
+<!-- # Define output path -->
+<!-- mm909_keggmed_nonsyn_plot_path <- file.path(figures_path, -->
+<!--                               "mm909_keggmed_nonsyn_plot.png") -->
+
+<!-- mm909_keggmed_nonsyn_plot <- plot_top5(response_df, fora_results_keggmed_nonsyn_df, mm909_keggmed_nonsyn_plot_path, "FORA with top C2:CP:KEGG_MEDICUS across samples (Nonsyn mutations)", "Top C2:CP:KEGG_MEDICUS Gene Sets") -->
+
+<!-- print(mm909_keggmed_nonsyn_plot) -->
+<!-- ``` -->
+
+### Visualization: Top C2:CP:KEGG_MEDICUS across samples stratified by response (LoF mutations)
+
+Not enough data
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=15, fig.height=20} -->
+<!-- # Define output path -->
+<!-- mm909_keggmed_lof_plot_path <- file.path(figures_path, -->
+<!--                               "mm909_keggmed_lof_plot.png") -->
+
+<!-- mm909_keggmed_lof_plot <- plot_top5(response_df, fora_results_keggmed_lof_df, mm909_keggmed_lof_plot_path, "FORA with top C2:CP:KEGG_MEDICUS across samples (LoF mutations)", "Top C2:CP:KEGG_MEDICUS Gene Sets") -->
+
+<!-- print(mm909_keggmed_lof_plot) -->
+<!-- ``` -->
+
+## Ninth analysis using C2:CP:REACTOME
+
+```{r, message=FALSE, warning=FALSE}
+# Define paths
+fora_results_all_csv_path <- file.path(results_ubgsea_path, "fora_results_reactome_all.csv")
+fora_results_nonsyn_csv_path <- file.path(results_ubgsea_path, "fora_results_reactome_nonsyn.csv")
+fora_results_lof_csv_path <- file.path(results_ubgsea_path, "fora_results_reactome_lof.csv")
+
+# Perform FORA analysis for C2_CGP Gene Sets
+results_list <- perform_fora_analysis(list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C2", subcategory="CP:REACTOME")
+
+# Load fora results
+fora_results_reactome_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
+fora_results_reactome_nonsyn_df <- read.csv(fora_results_nonsyn_csv_path, header = TRUE)[ , -1]
+fora_results_reactome_lof_df <- read.csv(fora_results_lof_csv_path, header = TRUE)[ , -1]
+```
+
+### Visualization: Top C2:CP:REACTOME across samples stratified by response (All mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=10}
+# Define output path
+mm909_reactome_all_plot_path <- file.path(figures_path,
+                              "mm909_reactome_all_plot.png")
+
+mm909_reactome_all_plot <- plot_top5(response_df, fora_results_reactome_all_df, mm909_reactome_all_plot_path, "FORA with top C2:CP:REACTOME across samples (All mutations)", "Top C2:CP:REACTOME Gene Sets")
+
+print(mm909_reactome_all_plot)
+```
+
+### Visualization: Top C2:CP:REACTOME across samples stratified by response (Nonsyn mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=10}
+# Define output path
+mm909_reactome_nonsyn_plot_path <- file.path(figures_path,
+                              "mm909_reactome_nonsyn_plot.png")
+
+mm909_reactome_nonsyn_plot <- plot_top5(response_df, fora_results_reactome_nonsyn_df, mm909_reactome_nonsyn_plot_path, "FORA with top C2:CP:REACTOME across samples (Nonsyn mutations)", "Top C2:CP:REACTOME Gene Sets")
+
+print(mm909_reactome_nonsyn_plot)
+```
+
+### Visualization: Top C2:CP:REACTOME across samples stratified by response (LoF mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=10}
+# Define output path
+mm909_reactome_lof_plot_path <- file.path(figures_path,
+                              "mm909_reactome_lof_plot.png")
+
+mm909_reactome_lof_plot <- plot_top5(response_df, fora_results_reactome_lof_df, mm909_reactome_lof_plot_path, "FORA with top C2:CP:REACTOME across samples (LoF mutations)", "Top C2:CP:REACTOME Gene Sets")
+
+print(mm909_reactome_lof_plot)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
