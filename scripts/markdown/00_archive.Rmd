@@ -414,6 +414,10 @@ removed_rows <- dplyr::anti_join(maf_df_annotated_wo_ensembl,
 print(nrow(removed_rows))
 ```
 
+```{r}
+list_of_drugs <- c("Vemurafenib (BRAFi)", "Dacarbazine", "Ipilimumab", "Binimetinib (MEKi) - after", "Nivolumab - after", "Pembroluzimab - after", "Selinexor - after", "Temodal", "IL-2")
+```
+
 ## Session Info
 
 ```{r}

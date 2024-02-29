@@ -41,7 +41,7 @@ BiocManager::install("VariantAnnotation")
 # BiocManager::install("biomaRt")
 BiocManager::install("maftools")
 BiocManager::install("GSEABase")
-# BiocManager::install("EnsDb.Hsapiens.v75") # From Ensembl
+BiocManager::install("EnsDb.Hsapiens.v75") # From Ensembl
 BiocManager::install("org.Hs.eg.db") # From NCBI Entrez Gene data and other sources
 BiocManager::install("fgsea")
 BiocManager::install("limma")

@@ -84,16 +84,35 @@ ENTREZtoENSEMBL <- function(x){
   return(vec)
 }
 
+# Convert Hugo Symbols to Ensembl Gene IDs
+SYMBOLtoENSEMBL <- function(x){
+  vec=mapIds(org.Hs.eg.db,
+             keys=x,
+             column="ENSEMBL",
+             keytype="SYMBOL",
+             multiVals="first")
+  repl=which(is.na(vec))
+  for(y in repl){
+    vec[y]=x[y]
+  }
+  return(vec)
+}
+
 # Perform FORA analysis for a specific Human Gene Set collection
-perform_fora_analysis <- function(category, subcategory, all_mut_list, nonsyn_mut_list, lof_mut_list, fora_results_all_csv_path, fora_results_nosnyn_csv_path, fora_results_lof_csv_path) {
+perform_fora_analysis <- function(all_mut_list, nonsyn_mut_list, lof_mut_list, fora_results_all_csv_path, fora_results_nosnyn_csv_path, fora_results_lof_csv_path, category=NULL, subcategory=NULL, gene_sets_list=NULL) {
   # Load required libraries
   library(msigdbr)
   library(fgsea)
   library(EnsDb.Hsapiens.v75)
   
-  # Get a list of gene sets for the specified category with their associated genes
-  gene_sets_df <- msigdbr(species = "human", category = category, subcategory = subcategory)
-  gene_sets_list <- split(x = gene_sets_df$ensembl_gene, f = gene_sets_df$gs_name)
+  if (!is.null(category)){
+    # Get a list of gene sets for the specified category with their associated genes
+    gene_sets_df <- msigdbr(species = "human", category = category, subcategory = subcategory)
+    gene_sets_list <- split(x = gene_sets_df$ensembl_gene, f = gene_sets_df$gs_name)
+  } else if (is.null(gene_sets_list)) {
+    # Raise exception & stop execution
+    stop("category and gene_sets_list are both NULL. Please provide a 'category' or 'gene_sets_list'.")
+  }
   
   # Get all the Ensembl human Gene IDs
   genes_info <- genes(EnsDb.Hsapiens.v75)
@@ -127,32 +146,23 @@ perform_fora_analysis <- function(category, subcategory, all_mut_list, nonsyn_mu
   
   fora_results_lof_df <- merge_fora_data_tables_adding_id(fora_results_lof_list)
   write.csv(fora_results_lof_df, file = fora_results_lof_csv_path, row.names = TRUE)
-  
-  # Return
-  return(list(fora_results_all_list = fora_results_all_list,
-              fora_results_nonsyn_list = fora_results_nonsyn_list,
-              fora_results_lof_list = fora_results_lof_list))
 }
 
 # Plot top 5 Gene Sets across samples stratified by response
-plot_top5 <- function(response_df, mut_list, plot_path, fig_title, fig_y_label) {
+plot_top5 <- function(response_df, mut_df, plot_path, fig_title, fig_y_label) {
   
-  # Prepare data for all samples in the list: Filter padjust < 0.5 & calculate Gene ratio per sample from a mut_list
-  prepared_data_list <- lapply(names(mut_list), function(sample_id) {
-    mut_list[[sample_id]] %>%
-      dplyr::filter(padj < 0.05) %>% 
-      dplyr::mutate(Gene_ratio = overlap / size,
-                    Count = overlap,
-                    sample_id = sample_id) %>%
-      dplyr::slice_min(order_by = padj, n = 5) %>%
-      dplyr::arrange(desc(Gene_ratio))
-  })
-
-  # Combine all prepared datasets into one
-  combined_data <- bind_rows(prepared_data_list)
+  # Prepare data for all samples in the df: Filter padjust < 0.5 & calculate Gene ratio per sample
+  prepared_data_df <- mut_df %>%
+    dplyr::group_by(sample_id) %>%
+    dplyr::filter(padj < 0.05) %>%
+    dplyr::mutate(Gene_ratio = overlap / size,
+                  Count = overlap) %>%
+    dplyr::slice_min(order_by = padj, n = 5) %>%
+    dplyr::arrange(sample_id, desc(Gene_ratio)) %>%
+    dplyr::ungroup()
 
   # Merge response info
-  combined_data <- combined_data %>%
+  combined_data <- prepared_data_df %>%
     dplyr::left_join(response_df, by = "sample_id")
 
   # Step 1: Create an ordered factor for sample_id based on patient_response
@@ -198,31 +208,28 @@ plot_top5 <- function(response_df, mut_list, plot_path, fig_title, fig_y_label) 
     guides(size = guide_legend(title = "Gene Ratio"))
 
   # Save plot
-  ggsave(plot_path, top5_plot, width = 12, height = 8, dpi = 300)
+  ggsave(plot_path, top5_plot, width = 15, height = 20, dpi = 300)
   
   # Return
   return(top5_plot)
 }
 
 # Plot (a) specific Gene Set(s) across samples stratified by response
-plot_geneset <- function(geneset, response_df, mut_list, plot_path, fig_title, fig_y_label) {
+plot_geneset <- function(geneset, response_df, mut_df, plot_path, fig_title, fig_y_label) {
   # geneset is a vector i.e. c("GS1", "GS2")
   
-  # Prepare data for all samples in the list: Filter Gene Set & calculate Gene ratio per sample from a mut_list
-  prepared_data_list <- lapply(names(mut_list), function(sample_id) {
-    mut_list[[sample_id]] %>%
-      dplyr::filter(pathway %in% geneset) %>% 
-      dplyr::mutate(Gene_ratio = overlap / size,
-                    Count = overlap,
-                    sample_id = sample_id) %>%
-      dplyr::arrange(desc(Gene_ratio))
-  })
-  
-  # Combine all prepared datasets into one
-  combined_data <- bind_rows(prepared_data_list)
+  # Prepare data for all samples in the df: Filter Gene Set & calculate Gene ratio per sample
+  prepared_data_df <- mut_df %>%
+    dplyr::group_by(sample_id) %>%
+    dplyr::filter(pathway %in% geneset) %>% 
+    dplyr::mutate(Gene_ratio = overlap / size,
+                  Count = overlap,
+                  sample_id = sample_id) %>%
+    dplyr::arrange(desc(Gene_ratio)) %>%
+    dplyr::ungroup()
   
   # Merge response info
-  combined_data <- combined_data %>%
+  combined_data <- prepared_data_df %>%
     dplyr::left_join(response_df, by = "sample_id")
   
   # Step 1: Create an ordered factor for sample_id based on patient_response
