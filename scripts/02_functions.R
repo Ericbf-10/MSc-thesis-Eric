@@ -70,6 +70,52 @@ SYMBOLtoENSEMBL <- function(x){
   return(vec)
 }
 
+# Plot that summarizes the mutation count for each patient
+sum_plot <- function(all_mut_df, nonsyn_mut_df, lof_mut_df, plot_path) {
+  # Prepare a combined_df
+  combined_df <- bind_rows(
+    all_mut_df %>% mutate(source = 'All'),
+    nonsyn_mut_df %>% mutate(source = 'Nonsyn'),
+    lof_mut_df %>% mutate(source = 'LoF')
+  ) %>%
+    dplyr::select(sample_id, source)
+  
+  # Adjust the factor levels for 'source' to control the order
+  combined_df$source <- factor(combined_df$source, levels = c("All", "Nonsyn", "LoF"))
+  
+  # Recalculate the counts
+  count_df <- combined_df %>%
+    group_by(sample_id, source) %>%
+    summarise(count = n(), .groups = 'drop')
+  
+  # Calculate the maximum count to set the y-axis limit dynamically
+  max_count <- max(count_df$count, na.rm = TRUE)
+  buffer <- max_count * 0.1 # Add 10% buffer to the maximum count for the labels
+  
+  # Generate the plot with the adjusted source ordering
+  bar_plot <- ggplot(count_df, aes(x = source, y = count, fill = source)) +
+    geom_bar(stat = "identity", position = position_dodge()) +
+    geom_text(aes(label = count), vjust = -0.5, position = position_dodge(0.9)) +
+    scale_fill_manual(values = c("All" = "darkblue", "Nonsyn" = "darkred", "LoF" = "darkgreen"),
+                      name = "Mutation Type") +
+    facet_wrap(~ sample_id, scales = "free_x") +
+    labs(x = "Mutation Type", 
+         y = "Count", 
+         title = "Number of mutations per patient") +
+    ylim(0, max_count + buffer) + # Adjust the y-axis to include the buffer
+    theme_minimal() +
+    theme(panel.background = element_rect(fill = "white", colour = "black"),
+          plot.background = element_rect(fill = "white", colour = NA),
+          panel.grid.minor = element_blank(),
+          plot.title = element_text(hjust = 0.5)) # Attempt to visually center the title, though limitations exist
+  
+  # Save
+  ggsave(plot_path, bar_plot, width = 15, height = 15, dpi = 300)
+  
+  # Return
+  return(bar_plot)
+}
+
 # Transform a list of data tables coming from the fora results into a big data.frame maintaining the id
 merge_fora_data_tables_adding_id <- function(data_tables_list) {
   # Check if input is a list
@@ -171,7 +217,7 @@ plot_top5 <- function(response_df, mut_df, plot_path, fig_title, fig_y_label) {
     dplyr::mutate(Gene_ratio = overlap / size,
                   Count = overlap) %>%
     dplyr::slice_min(order_by = padj, n = 5) %>%
-    dplyr::arrange(sample_id, desc(Gene_ratio)) %>%
+    dplyr::arrange(sample_id, desc(Count)) %>%
     dplyr::ungroup()
 
   # Merge response info
@@ -188,28 +234,37 @@ plot_top5 <- function(response_df, mut_df, plot_path, fig_title, fig_y_label) {
   # Use this ordering to reorder sample_id in the combined data
   combined_data$sample_id <- factor(combined_data$sample_id,
                                     levels = response_order$sample_id)
-
-  # Determine dynamic breaks based on quantiles of Gene Ratio
-  gene_ratio_breaks <- quantile(combined_data$Gene_ratio, probs = seq(0, 1, by = 0.5), na.rm = TRUE)
+  
+  # Calculate dynamic breaks and labels for Count
+  count_breaks <- quantile(combined_data$Count, probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
+  count_breaks <- round(count_breaks) # Ensure count_breaks are integers by rounding
+  count_breaks <- count_breaks[count_breaks > 0] # Remove 0 values from count_breaks
+  count_breaks <- unique(count_breaks) # Make sure breaks are unique
+  
+  # Dynamically generate count_labels based on the available count_breaks
+  count_labels <- vector("character", length(count_breaks))
+  for (i in seq_along(count_breaks)) {
+    count_labels[i] <- as.character(count_breaks[i])
+  }
   
   # Step 2: Plot with ordered sample_id and facets to distinguish "R" and "NR"
   top5_plot <- ggplot(combined_data, aes(x = sample_id,
-                                              y = reorder(pathway, Gene_ratio),
-                                              size = Gene_ratio,
+                                              y = reorder(pathway, Count),
+                                              size = Count,
                                               color = padj)) +
     geom_point() +
-    scale_color_gradient(low = "blue", high = "red", trans = "log10",
+    scale_color_gradient(low = "blue", high = "red", trans = "log10", # Log10 transformation for a better visualization
                          limits = c(1e-6, 1), oob = scales::oob_squish) +
-    scale_size_continuous(name = "Gene Ratio",
-                          range = c(1, 6),  # Adjust size range to match your preference
-                          breaks = gene_ratio_breaks,  # Define breaks based on "Gene Ratio" distribution
-                          labels = format(gene_ratio_breaks, digits = 2)) +  # Label breaks as needed
+    scale_size_continuous(name = "Count",
+                          range = c(1, 6),  # Adjust the visual size range as needed
+                          breaks = count_breaks,
+                          labels = count_labels) +
     facet_grid(. ~ patient_response, scales = "free_x", space = "free_x") +
     theme_minimal() +
     theme(
-      panel.background = element_rect(fill = "white", colour = "black"),
       panel.grid.major = element_line(color = "grey", linewidth = 0.5),
       panel.grid.minor = element_blank(),
+      panel.background = element_rect(fill = "white", colour = "black"),
       plot.background = element_rect(fill = "white", colour = NA),
       legend.position = "right",
       axis.text.x = element_text(angle = 45, hjust = 1)
@@ -217,8 +272,8 @@ plot_top5 <- function(response_df, mut_df, plot_path, fig_title, fig_y_label) {
     labs(title = fig_title,
          x = "Sample ID",
          y = fig_y_label,
-         color = "p.adjust (log10)") +
-    guides(size = guide_legend(title = "Gene Ratio"))
+         color = "p.adjust (log10)",
+         size = "Count")
 
   # Save plot
   ggsave(plot_path, top5_plot, width = 15, height = 20, dpi = 300)
@@ -238,7 +293,7 @@ plot_geneset <- function(geneset, response_df, mut_df, plot_path, fig_title, fig
     dplyr::mutate(Gene_ratio = overlap / size,
                   Count = overlap,
                   sample_id = sample_id) %>%
-    dplyr::arrange(desc(Gene_ratio)) %>%
+    dplyr::arrange(desc(Count)) %>%
     dplyr::ungroup()
   
   # Merge response info
@@ -256,27 +311,36 @@ plot_geneset <- function(geneset, response_df, mut_df, plot_path, fig_title, fig
   combined_data$sample_id <- factor(combined_data$sample_id,
                                     levels = response_order$sample_id)
   
-  # Determine dynamic breaks based on quantiles of Gene Ratio
-  gene_ratio_breaks <- quantile(combined_data$Gene_ratio, probs = seq(0, 1, by = 0.5), na.rm = TRUE)
+  # Calculate dynamic breaks and labels for Count
+  count_breaks <- quantile(combined_data$Count, probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
+  count_breaks <- round(count_breaks) # Ensure count_breaks are integers by rounding
+  count_breaks <- count_breaks[count_breaks > 0] # Remove 0 values from count_breaks
+  count_breaks <- unique(count_breaks) # Make sure breaks are unique
+  
+  # Dynamically generate count_labels based on the available count_breaks
+  count_labels <- vector("character", length(count_breaks))
+  for (i in seq_along(count_breaks)) {
+    count_labels[i] <- as.character(count_breaks[i])
+  }
   
   # Step 2: Plot with ordered sample_id and facets to distinguish "R" and "NR"
   geneset_plot <- ggplot(combined_data, aes(x = sample_id, 
-                                                    y = reorder(pathway, Gene_ratio),
-                                                    size = Gene_ratio,
+                                                    y = reorder(pathway, Count),
+                                                    size = Count,
                                                     color = padj)) +
     geom_point() +
     scale_color_gradient(low = "blue", high = "red", trans = "log10",
                          limits = c(1e-6, 1), oob = scales::oob_squish) +
-    scale_size_continuous(name = "Gene Ratio",
-                          range = c(1, 6),  # Adjust size range to match your preference
-                          breaks = gene_ratio_breaks,  # Define breaks based on "Gene Ratio" distribution
-                          labels = format(gene_ratio_breaks, digits = 1)) +  # Label breaks as needed
+    scale_size_continuous(name = "Count",
+                          range = c(1, 6),  # Adjust the visual size range as needed
+                          breaks = count_breaks,
+                          labels = count_labels) +
     facet_grid(. ~ patient_response, scales = "free_x", space = "free_x") +
     theme_minimal() +
     theme(
-      panel.background = element_rect(fill = "white", colour = "black"),
       panel.grid.major = element_line(color = "grey", linewidth = 0.5),
       panel.grid.minor = element_blank(),
+      panel.background = element_rect(fill = "white", colour = "black"),
       plot.background = element_rect(fill = "white", colour = NA),
       legend.position = "right",
       axis.text.x = element_text(angle = 45, hjust = 1)
@@ -284,8 +348,8 @@ plot_geneset <- function(geneset, response_df, mut_df, plot_path, fig_title, fig
     labs(title = fig_title,
          x = "Sample ID",
          y = fig_y_label,
-         color = "p.adjust (log10)") +
-    guides(size = guide_legend(title = "Gene Ratio"))
+         color = "p.adjust (log10)",
+         size = "Count")
   
   # Save plot
   ggsave(plot_path, geneset_plot, width = 12, height = 8, dpi = 300)
