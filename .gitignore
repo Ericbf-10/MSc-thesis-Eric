@@ -3,4 +3,4 @@
 .RData
 .Ruserdata
 .DS_Store
-/results/output/somatic_mutation_analysis/*.csv
+/results/**/*.csv

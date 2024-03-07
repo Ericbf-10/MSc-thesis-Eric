@@ -34,6 +34,11 @@ current_dir <- getwd()
 results_pc_path <- file.path(current_dir,
                               "../../results/patient_characteristics/output")
 
+# Create the folder if it does not exist
+if(!file.exists(results_pc_path)) {
+  dir.create(results_pc_path, recursive = TRUE)
+}
+
 # Sup1
 sup1_data <- "../../data/_raw/41467_2017_1460_MOESM4_ESM_clinical.xlsx"
 sup1_path <- file.path(current_dir,

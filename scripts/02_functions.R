@@ -70,7 +70,7 @@ SYMBOLtoENSEMBL <- function(x){
   return(vec)
 }
 
-# Plot that summarizes the mutation count for each patient
+# Bar Plot that summarizes the mutation count for each patient
 sum_plot <- function(all_mut_df, nonsyn_mut_df, lof_mut_df, plot_path) {
   # Prepare a combined_df
   combined_df <- bind_rows(
@@ -207,10 +207,10 @@ perform_fora_analysis <- function(all_mut_list, nonsyn_mut_list, lof_mut_list, f
   write.csv(fora_results_lof_df, file = fora_results_lof_csv_path, row.names = TRUE)
 }
 
-# Plot top 5 Gene Sets across samples stratified by response
+# Bubble Plot top 5 Gene Sets across samples stratified by response
 plot_top5 <- function(response_df, mut_df, plot_path, fig_title, fig_y_label) {
   
-  # Prepare data for all samples in the df: Filter padjust < 0.5 & calculate Gene ratio per sample
+  # Prepare data for all samples in the df: Filter padjust < 0.05 & calculate Gene ratio per sample
   prepared_data_df <- mut_df %>%
     dplyr::group_by(sample_id) %>%
     dplyr::filter(padj < 0.05) %>%
@@ -282,7 +282,7 @@ plot_top5 <- function(response_df, mut_df, plot_path, fig_title, fig_y_label) {
   return(top5_plot)
 }
 
-# Plot (a) specific Gene Set(s) across samples stratified by response
+# Bubble Plot for (a) specific Gene Set(s) across samples stratified by response
 plot_geneset <- function(geneset, response_df, mut_df, plot_path, fig_title, fig_y_label) {
   # geneset is a vector i.e. c("GS1", "GS2")
   
@@ -356,4 +356,144 @@ plot_geneset <- function(geneset, response_df, mut_df, plot_path, fig_title, fig
   
   # Return
   return(geneset_plot)
+}
+
+# Bar Plot Combined Gene Sets for 1 sample
+plot_combinedGS <- function(sample_id, response_df, mut_df, plot_path, fig_title, max_x, dynamic_width) {
+  
+  # Prepare data for all samples in the df: Filter padjust < 0.05 & calculate Gene ratio per sample
+  prepared_data_df <- mut_df %>%
+    dplyr::filter(sample_id == !!sample_id) %>%
+    # dplyr::filter(padj < 0.05) %>%
+    dplyr::mutate(Gene_ratio = overlap / size,
+                  Count = overlap) %>%
+    dplyr::filter(Count > 0) %>%
+    dplyr::arrange(desc(Count))
+  
+  # Merge response info
+  combined_data <- prepared_data_df %>%
+    dplyr::left_join(response_df, by = "sample_id")
+  
+  # Find the maximum value in the 'Count' column
+  max_value <- max(combined_data$Count, na.rm = TRUE)
+  
+  # Define base plot width and scale factor
+  base_width <- 10 # Base width for plots
+  scale_factor <- 0.2 # Width increase per unit in max_value beyond a threshold
+  
+  # Calculate dynamic width based on max_value
+  # dynamic_width <- base_width + (max_value * scale_factor)
+  
+  combinedGS_plot <- ggplot(combined_data, aes(x = Count,
+                                               y = reorder(pathway, Count),
+                                               fill = padj)) +
+    geom_col() +
+    scale_fill_gradient(low = "blue", high = "red", trans = "log10", # Log10 transformation for a better visualization
+                        limits = c(1e-6, 1), oob = scales::oob_squish) +
+    # scale_x_continuous(breaks = seq(0, max_value, by = 1)) +
+    scale_x_continuous(
+      breaks = seq(0, max_x, by = 5),
+      limits = c(NA, max_x) # Set upper limit, lower limit is NA for auto-calculation
+    ) +
+    theme_minimal() +
+    theme(
+      panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+      panel.grid.minor = element_blank(),
+      panel.background = element_rect(fill = "white", colour = "black"),
+      plot.background = element_rect(fill = "white", colour = NA),
+      legend.position = "right",
+    ) +
+    labs(title = fig_title,
+         x = "Gene Count",
+         y = "Enriched Gene Sets",
+         fill = "p.adjust (log10)")
+  
+  # Save plot
+  ggsave(plot_path, combinedGS_plot, width = dynamic_width, height = 15, dpi = 300)
+  
+  # Return
+  return(combinedGS_plot)
+}
+
+# Box Plot for (a) specific Gene Set(s) across samples stratified by response
+boxplot_genesets <- function(geneset, response_df, mut_df, plot_path, fig_title, max_y) {
+  # geneset is a vector i.e. c("GS1", "GS2")
+  
+  # Prepare data: Filter Gene Set & calculate Gene ratio per sample
+  prepared_data_df <- mut_df %>%
+    dplyr::filter(pathway %in% geneset) %>%
+    dplyr::mutate(Gene_ratio = overlap / size, Count = overlap) %>%
+    dplyr::ungroup()
+  
+  # Merge response info
+  combined_data <- prepared_data_df %>%
+    dplyr::left_join(response_df, by = "sample_id")
+  
+  # Plot
+  geneset_boxplot <- ggplot(combined_data, aes(x = pathway, 
+                                               y = Count, 
+                                               fill = patient_response)) +
+    geom_boxplot(position = position_dodge(width = 0.75)) +  # Adjust dodge width as necessary
+    scale_fill_manual(values = c("NR" = "#E41A1C", "R" = "#377EB8"), 
+                      labels = c("NR" = "Non-Responders", "R" = "Responders")) +
+    scale_y_continuous(
+      breaks = seq(0, max_y, by = 10),
+      limits = c(NA, max_y) # Set upper limit, lower limit is NA for auto-calculation
+    ) +
+    theme_minimal() +
+    theme(
+      panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+      panel.grid.minor = element_blank(),
+      panel.background = element_rect(fill = "white", colour = "black"),
+      plot.background = element_rect(fill = "white", colour = NA),
+      legend.position = "right",
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    ) +
+    labs(title = fig_title,
+         x = "Gene Set",
+         y = "Count",
+         fill = "Patient Response")
+  
+  # Save plot
+  ggsave(plot_path, geneset_boxplot, width = 20, height = 12, dpi = 300)
+  
+  # Return the plot object
+  return(geneset_boxplot)
+}
+
+# Heat Map of combined GS across samples
+heat_map_genesets <- function(response_df, mut_df, plot_path, fig_title) {
+  
+  # Prepare data for all samples
+  prepared_data_df <- mut_df %>%
+    dplyr::group_by(sample_id) %>%
+    dplyr::mutate(Gene_ratio = overlap / size,
+                  Count = overlap) %>%
+    dplyr::arrange(sample_id, desc(Count)) %>%
+    dplyr::ungroup() %>% 
+    dplyr::select(sample_id, pathway, Count)
+  
+  # Merge response info
+  combined_data <- prepared_data_df %>%
+    dplyr::left_join(response_df, by = "sample_id")
+  
+  # Step 2: Plot with ordered sample_id and facets to distinguish "R" and "NR"
+  heat_map_plot <- ggplot(combined_data, aes(x = pathway, 
+                                             y = sample_id, 
+                                             fill = Count)) +
+    geom_tile(color = "black", linewidth = 0.2) +
+    scale_fill_gradient(low = "yellow", high = "red") + # Customize gradient colors as needed
+    theme_minimal() +
+    labs(fill = "Count", x = "Pathway", y = "Sample ID") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) + # Improve axis label readability
+    labs(title = fig_title,
+         x = "Gene Set",
+         y = "Sample ID",
+         fill = "Count")
+  
+  # Save plot
+  ggsave(plot_path, heat_map_plot, width = 15, height = 10, dpi = 300)
+  
+  # Return
+  return(heat_map_plot)
 }

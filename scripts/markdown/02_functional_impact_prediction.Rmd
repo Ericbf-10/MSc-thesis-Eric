@@ -42,10 +42,22 @@ current_dir <- getwd()
 # Results
 results_pc_path <- file.path(current_dir,
                               "../../results/patient_characteristics/output")
+
 results_fip_path <- file.path(current_dir,
                               "../../results/somatic_mutation_analysis/functional_impact_prediction/output")
-figures_path <- file.path(current_dir, 
+
+# Create the folder if it does not exist
+if(!file.exists(results_fip_path)) {
+  dir.create(results_fip_path, recursive = TRUE)
+}
+
+figures_fip_path <- file.path(current_dir, 
                                  "../../results/somatic_mutation_analysis/functional_impact_prediction/figures")
+
+# Create the folder if it does not exist
+if(!file.exists(figures_fip_path)) {
+  dir.create(figures_fip_path, recursive = TRUE)
+}
 
 # MAF-like file
 maf_data <- "../../data/_raw/41467_2017_1460_MOESM6_ESM_somatic_mutations.xlsx"
@@ -249,7 +261,7 @@ write.table(api_input$API_info, file = vep_file_path, row.names = FALSE, col.nam
 
 ```{r, message=FALSE, warning=FALSE}
 ### Define path
-vep_out_data <- "../../data/vep_output_nonsyn_grch37_05.txt"
+vep_out_data <- "../../data/vep_output_nonsyn_grch37_06.txt"
 vep_path <- file.path(current_dir,
                       vep_out_data)
 
@@ -274,6 +286,8 @@ vep_df_clean <- vep_df %>%
 ```
 
 The columns that **do not have any information** are: `r toString(setdiff(colnames(vep_df), colnames(vep_df_clean)))`
+
+The consideration of LoF mutations has been made in a "liberal" manner, meaning that if either SIFT or PolyPhen scores indicated the mutation to be deleterious, the mutation was considered LoF. In other words, both metrics did not have to be in agreement to consider a mutation LoF.
 
 # Get a list of LoF mutations per patient
 
@@ -375,7 +389,7 @@ head(lof_binary)
 
 ```{r, message=FALSE, warning=FALSE}
 # Define output path
-nonsyn_plot_path <- file.path(figures_path, 
+nonsyn_plot_path <- file.path(figures_fip_path, 
                               "nonsyn_plot.png")
 
 # Count the occurrences of each unique value in Variant_Classification
@@ -415,7 +429,7 @@ ggsave(nonsyn_plot_path, nonsyn_plot, width = 10, height = 8, dpi = 300)
 
 ```{r, message=FALSE, warning=FALSE}
 # Define output path
-lof_SIFT_plot_path <- file.path(figures_path, 
+lof_SIFT_plot_path <- file.path(figures_fip_path, 
                            "lof_SIFT_plot.png")
 
 # Count the occurrences of each unique value in Consequence and calculate the true frequency
@@ -456,7 +470,7 @@ ggsave(lof_SIFT_plot_path, lof_SIFT_plot, width = 10, height = 8, dpi = 300)
 
 ```{r, message=FALSE, warning=FALSE}
 # Define output path
-lof_PolyPhen_plot_path <- file.path(figures_path, 
+lof_PolyPhen_plot_path <- file.path(figures_fip_path, 
                            ".lof_PolyPhen_plot.png")
 
 # Count the occurrences of each unique value in Consequence and calculate the true frequency
@@ -507,7 +521,7 @@ tmb_response_df <- tmb_df %>%
          patient_response = Patient.Response)
 
 # Define output path
-tmb_boxplot_path <- file.path(figures_path, 
+tmb_boxplot_path <- file.path(figures_fip_path, 
                            "tmb_boxplot.png")
 
 # Create a boxplot

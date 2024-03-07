@@ -39,14 +39,27 @@ source(file = "../02_functions.R")
 current_dir <- getwd()
 data_path <- file.path(current_dir,
                        "../../data/_raw")
+interesting_gs_path <- file.path(data_path,
+                                 "../interesting_genesets.xlsx")
 results_pc_path <- file.path(current_dir,
                               "../../results/patient_characteristics/output")
 results_fip_path <- file.path(current_dir,
                               "../../results/somatic_mutation_analysis/functional_impact_prediction/output")
 results_gor_path <- file.path(current_dir, 
                                  "../../results/somatic_mutation_analysis/gene_overrepresentation_analysis/output")
+
+# Create the folder if it does not exist
+if(!file.exists(results_gor_path)) {
+  dir.create(results_gor_path, recursive = TRUE)
+}
+
 figures_gor_path <- file.path(current_dir, 
                                  "../../results/somatic_mutation_analysis/gene_overrepresentation_analysis/figures")
+
+# Create the folder if it does not exist
+if(!file.exists(figures_gor_path)) {
+  dir.create(figures_gor_path, recursive = TRUE)
+}
 
 maf_df_path <- file.path(results_fip_path, "all_mutations.csv") # All mutations df
 nonsyn_df_path <- file.path(results_fip_path, "nonsyn_mutations.csv") # Nonsyn mutations df
@@ -89,6 +102,11 @@ sample_id_lists <- split(sup1_response_df$Sample.ID,
 
 r_sample_ids <- sample_id_lists$R
 nr_sample_ids <- sample_id_lists$NR
+
+## Read the gene sets Excel file
+interesting_gs <- read_excel(interesting_gs_path)
+interesting_gs_list <- na.omit(as.character(interesting_gs[["Gene Set"]])) # Extract the "Gene Set" column, convert to character and omit NAs
+boolean_gs_list <- paste(interesting_gs_list, collapse = " OR ") # This is to generate the query to search in MSigDB
 ```
 
 # Summary of mutations per patient
@@ -726,6 +744,143 @@ geneset = c("KEGG_PROTEASOME")
 mm909_keggproteasome_lof_plot <- plot_geneset(geneset, response_df, fora_results_proteasome_lof_df, mm909_keggproteasome_lof_plot_path, "FORA with KEGG_PROTEASOME GS across samples (LoF mutations)", "KEGG_PROTEASOME Gene Set")
 
 print(mm909_keggproteasome_lof_plot)
+```
+
+# Combined interesting Gene Sets visualizations
+
+I queried MSigDB with 45 interesting Gene Sets that I extracted from the previous exploratory analysis. For some reason, I could not find the GRAESSMANN_APOPTOSIS_BY_DOXORUBICIN_DN and YOSHIMURA_MAPK8_TARGETS_UP for Human when doing this, although I got them when I did the C2:CGP analysis (I always use human in the function). So, I ended up with 43. Here I only present plots containing LoF mutations.
+
+## FORA using a custom GMT file from MSigDB
+
+```{r, message=FALSE, warning=FALSE}
+# Define paths
+fora_results_all_csv_path <- file.path(results_gor_path, "fora_results_combinedGS_all.csv")
+fora_results_nonsyn_csv_path <- file.path(results_gor_path, "fora_results_combinedGS_nonsyn.csv")
+fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_combinedGS_lof.csv")
+
+# Load GMT file as a GeneSetCollection object
+gene_set_collection <- getGmt(file.path(data_path, "genesets_combined.v2023.2.Hs.gmt"))
+
+# Initialize an empty list to store the results
+gene_sets_list <- list()
+
+# Iterate over each GeneSet in the GeneSetCollection
+for (setName in names(gene_set_collection)) {
+  # Extract the GeneSet by its name
+  geneSet <- gene_set_collection[[setName]]
+
+  # Convert Hugo Symbols to Ensembl IDs for this GeneSet
+  ensembl_ids <- SYMBOLtoENSEMBL(geneIds(geneSet))
+
+  # Ensure the result is a character vector of Ensembl Gene IDs
+  ensembl_ids_vector <- as.character(ensembl_ids)
+
+  # Store the converted IDs in the list, associated with the setName
+  gene_sets_list[[setName]] <- ensembl_ids_vector
+}
+
+# # Perform FORA analysis for PROTEASOME Gene Sets
+# results_list <- perform_fora_analysis(list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, gene_sets_list=gene_sets_list)
+
+# Load fora results
+fora_results_combinedGS_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
+fora_results_combinedGS_nonsyn_df <- read.csv(fora_results_nonsyn_csv_path, header = TRUE)[ , -1]
+fora_results_combinedGS_lof_df <- read.csv(fora_results_lof_csv_path, header = TRUE)[ , -1]
+
+# Get all unique sample_id values
+unique_sample_ids <- unique(fora_results_combinedGS_lof_df$sample_id)
+```
+
+### Visualization: Bar plot per patient
+
+This does not have the filter p.adjust < 0.05.
+
+```{r, message=FALSE, warning=FALSE, fig.width=30.8, fig.height=15}
+# Loop through each sample_id
+for(sample_id in unique_sample_ids) {
+  # Define the output plot path dynamically based on the current sample_id
+  plot_path <- file.path(figures_gor_path, paste0(sample_id, "_combinedGS_lof_barplot.png"))
+  
+  # Get response group
+  response <- response_df %>% 
+    dplyr::filter(sample_id == !!sample_id) %>% 
+    dplyr::select(patient_response)
+  response <- as.character(response)
+  
+  # Generate the plot title dynamically
+  plot_title <- paste("FORA with combined GS for sample", sample_id, "-", response, "(LoF mutations)")
+  
+  # Call the plotting function with the current sample_id
+  combinedGS_lof_plot <- plot_combinedGS(sample_id, response_df, fora_results_combinedGS_lof_df, plot_path, plot_title, 105, 30.8)
+  
+  # Print
+  print(combinedGS_lof_plot)
+}
+```
+
+### Visualization: Bubble plot per Gene Set
+
+This does not have the filter p.adjust < 0.05.
+
+```{r, message=FALSE, warning=FALSE, fig.width=15, fig.height=5}
+# Loop through each geneset
+for(geneset in names(gene_sets_list)) {
+  # Define the output plot path dynamically based on the current geneset
+  plot_path <- file.path(figures_gor_path, paste0(geneset, "_combinedGS_lof_bubbleplot.png"))
+  
+  # Generate the plot title dynamically
+  plot_title <- paste("FORA with", geneset, "GS per sample stratified by response (LoF mutations)")
+  y_label <- NULL
+  
+  # Call the plotting function with the current geneset
+  combinedGS_lof_plot <- plot_geneset(geneset, response_df, fora_results_combinedGS_lof_df, plot_path, plot_title, y_label)
+  
+  # Print
+  print(combinedGS_lof_plot)
+}
+```
+
+### Visualization: Box plot per 10 Gene Sets
+
+This does not have the filter p.adjust < 0.05.
+
+```{r, message=FALSE, warning=FALSE, fig.width=20, fig.height=12}
+# Calculate the sequence of indices in steps of 10
+indices <- seq(from = 1, to = length(gene_sets_list), by = 10)
+
+# Loop through the indices
+global_idx <- 1
+for (i in indices) {
+  # Select a group of 10 gene sets or the remaining ones if less than 10
+  geneset_group <- names(gene_sets_list)[i:min(i+9, length(gene_sets_list))]
+  
+  # Define the output plot path dynamically based on the current index
+  plot_path <- file.path(figures_gor_path, paste0(global_idx, "_combinedGS_lof_bubbleplot.png"))
+  
+  # Call the plotting function with the current geneset group
+  combinedGS_lof_plot <- boxplot_genesets(geneset_group, response_df, fora_results_combinedGS_lof_df, plot_path, 
+                                      paste("FORA with GS", i, "to", min(i+9, length(gene_sets_list)), 
+                                            "stratified by response (LoF mutations)"), 110)
+  
+  # Print
+  print(combinedGS_lof_plot)
+  
+  # Update global index
+  global_idx = global_idx + 1
+}
+```
+
+### Visualization: Global heat map
+
+This does not have the filter p.adjust < 0.05.
+
+```{r, warning=FALSE, message=FALSE, fig.width=15, fig.height=10}
+plot_path <- file.path(figures_gor_path, "mm909_combinedGS_lof_heat_map.png")
+combinedGS_lof_plot <- heat_map_genesets(response_df, fora_results_combinedGS_lof_df, plot_path, 
+                                    "Heat Map of combined Gene Sets per patient")
+
+# Print
+print(combinedGS_lof_plot)
 ```
 
 # Session Info
