@@ -37,11 +37,43 @@ if (!require("msigdbr")) {
 if (!requireNamespace("BiocManager", quietly = TRUE)) {
   install.packages("BiocManager")
 }
-BiocManager::install("VariantAnnotation")
-# BiocManager::install("biomaRt")
-BiocManager::install("maftools")
-BiocManager::install("GSEABase")
-BiocManager::install("EnsDb.Hsapiens.v75") # From Ensembl
-BiocManager::install("org.Hs.eg.db") # From NCBI Entrez Gene data and other sources
-BiocManager::install("fgsea")
-BiocManager::install("limma")
+if (!("VariantAnnotation" %in% installed.packages())) {
+  # Install this package if it isn't installed yet
+  BiocManager::install("VariantAnnotation", update = FALSE)
+}
+if (!("biomaRt" %in% installed.packages())) {
+  # Install this package if it isn't installed yet
+  BiocManager::install("biomaRt", update = FALSE)
+}
+if (!("maftools" %in% installed.packages())) {
+  # Install this package if it isn't installed yet
+  BiocManager::install("maftools", update = FALSE)
+}
+if (!("GSEABase" %in% installed.packages())) {
+  # Install this package if it isn't installed yet
+  BiocManager::install("GSEABase", update = FALSE)
+}
+if (!("EnsDb.Hsapiens.v75" %in% installed.packages())) {
+  # Install this package if it isn't installed yet
+  BiocManager::install("EnsDb.Hsapiens.v75", update = FALSE) # From Ensembl
+}
+if (!("org.Hs.eg.db" %in% installed.packages())) { #### REMOVE??
+  # Install this package if it isn't installed yet
+  BiocManager::install("org.Hs.eg.db", update = FALSE) # From NCBI Entrez Gene data and other sources
+}
+if (!("fgsea" %in% installed.packages())) {
+  # Install this package if it isn't installed yet
+  BiocManager::install("fgsea", update = FALSE)
+}
+if (!("limma" %in% installed.packages())) {
+  # Install this package if it isn't installed yet
+  BiocManager::install("limma", update = FALSE)
+}
+if (!("clusterProfiler" %in% installed.packages())) {
+  # Install this package if it isn't installed yet
+  BiocManager::install("clusterProfiler", update = FALSE)
+}
+if (!("ggupset" %in% installed.packages())) {
+  # Install this package if it isn't installed yet
+  BiocManager::install("ggupset", update = FALSE)
+}

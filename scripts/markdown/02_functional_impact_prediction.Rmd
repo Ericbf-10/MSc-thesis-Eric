@@ -294,6 +294,7 @@ The consideration of LoF mutations has been made in a "liberal" manner, meaning 
 ```{r, message=FALSE, warning=FALSE}
 lof_vep_df <- vep_df_clean %>%
   dplyr::filter(Liberal_consequence == "deleterious") %>% 
+  dplyr::mutate(entrez_id = SYMBOLtoENTREZ(SYMBOL)) %>% 
   dplyr::arrange(sample_id)
 
 list_of_lof_mutations <- split(lof_vep_df, lof_vep_df$sample_id)

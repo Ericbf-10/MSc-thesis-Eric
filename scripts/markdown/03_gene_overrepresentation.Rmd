@@ -24,6 +24,7 @@ library(readxl)
 library(tidyverse)
 library(purrr)
 library(dplyr)
+library(magrittr)
 library(knitr)
 library(DT)
 library(httr)
@@ -136,7 +137,7 @@ fora_results_nonsyn_csv_path <- file.path(results_gor_path, "fora_results_c5bp_n
 fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_c5bp_lof.csv")
 
 # # Perform FORA analysis for C5:BP Gene Sets
-# results_list <- perform_fora_analysis(list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C5", subcategory="BP")
+# perform_fora_analysis(sample_id_list, list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C5", subcategory="BP")
 
 # Load fora results
 fora_results_c5bp_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
@@ -191,7 +192,7 @@ fora_results_nonsyn_csv_path <- file.path(results_gor_path, "fora_results_c5cc_n
 fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_c5cc_lof.csv")
 
 # # Perform FORA analysis for H Gene Sets
-# results_list <- perform_fora_analysis(list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C5", subcategory="CC")
+# perform_fora_analysis(sample_id_list, list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C5", subcategory="CC")
 
 # Load fora results
 fora_results_c5cc_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
@@ -224,7 +225,7 @@ fora_results_nonsyn_csv_path <- file.path(results_gor_path, "fora_results_h_nons
 fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_h_lof.csv")
 
 # # Perform FORA analysis for H Gene Sets
-# results_list <- perform_fora_analysis(list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="H")
+# perform_fora_analysis(sample_id_list, list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="H")
 
 # Load fora results
 fora_results_h_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
@@ -293,7 +294,7 @@ fora_results_nonsyn_csv_path <- file.path(results_gor_path, "fora_results_c6_non
 fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_c6_lof.csv")
 
 # # Perform FORA analysis for C6 Gene Sets
-# results_list <- perform_fora_analysis(list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C6")
+# perform_fora_analysis(sample_id_list, list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C6")
 
 # Load fora results
 fora_results_c6_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
@@ -348,7 +349,7 @@ fora_results_nonsyn_csv_path <- file.path(results_gor_path, "fora_results_c7_non
 fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_c7_lof.csv")
 
 # # Perform FORA analysis for C7 Gene Sets
-# results_list <- perform_fora_analysis(list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C7")
+# perform_fora_analysis(sample_id_list, list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C7")
 
 # Load fora results
 fora_results_c7_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
@@ -403,15 +404,15 @@ fora_results_nonsyn_csv_path <- file.path(results_gor_path, "fora_results_ubiqui
 fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_ubiquitin_lof.csv")
 
 # # Load GMT file as a GeneSetCollection object
-# gene_set_collection <- getGmt(file.path(data_path, "genesets_ubiquitin.v2023.2.Hs.gmt"))
+# gene_sets_collection <- getGmt(file.path(data_path, "genesets_ubiquitin.v2023.2.Hs.gmt"))
 # 
 # # Initialize an empty list to store the results
 # gene_sets_list <- list()
 # 
 # # Iterate over each GeneSet in the GeneSetCollection
-# for (setName in names(gene_set_collection)) {
+# for (setName in names(gene_sets_collection)) {
 #   # Extract the GeneSet by its name
-#   geneSet <- gene_set_collection[[setName]]
+#   geneSet <- gene_sets_collection[[setName]]
 # 
 #   # Convert Hugo symbols to Ensembl IDs for this GeneSet
 #   ensembl_ids <- SYMBOLtoENSEMBL(geneIds(geneSet))
@@ -424,7 +425,7 @@ fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_ubiquitin
 # }
 # 
 # # Perform FORA analysis for Ubiquitin Gene Sets
-# results_list <- perform_fora_analysis(list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, gene_sets_list=gene_sets_list)
+# perform_fora_analysis(sample_id_list, list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, gene_sets_list=gene_sets_list)
 
 # Load fora results
 fora_results_ubiquitin_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
@@ -479,7 +480,7 @@ fora_results_nonsyn_csv_path <- file.path(results_gor_path, "fora_results_c2cgp_
 fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_c2cgp_lof.csv")
 
 # # Perform FORA analysis for C2_CGP Gene Sets
-# results_list <- perform_fora_analysis(list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C2", subcategory="CGP")
+# perform_fora_analysis(sample_id_list, list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C2", subcategory="CGP")
 
 # Load fora results
 fora_results_c2cgp_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
@@ -534,15 +535,15 @@ fora_results_nonsyn_csv_path <- file.path(results_gor_path, "fora_results_keggme
 fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_keggmed_lof.csv")
 
 # # Load GMT file as a GeneSetCollection object
-# gene_set_collection <- getGmt(file.path(data_path, "c2.cp.kegg_medicus.v2023.2.Hs.entrez.gmt"))
+# gene_sets_collection <- getGmt(file.path(data_path, "c2.cp.kegg_medicus.v2023.2.Hs.entrez.gmt"))
 # 
 # # Initialize an empty list to store the results
 # gene_sets_list <- list()
 # 
 # # Iterate over each GeneSet in the GeneSetCollection
-# for (setName in names(gene_set_collection)) {
+# for (setName in names(gene_sets_collection)) {
 #   # Extract the GeneSet by its name
-#   geneSet <- gene_set_collection[[setName]]
+#   geneSet <- gene_sets_collection[[setName]]
 # 
 #   # Convert Entrez IDs to Ensembl IDs for this GeneSet
 #   ensembl_ids <- ENTREZtoENSEMBL(geneIds(geneSet))
@@ -555,7 +556,7 @@ fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_keggmed_l
 # }
 # 
 # # Perform FORA analysis for KEGG_MEDICUS Gene Sets
-# results_list <- perform_fora_analysis(list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, gene_sets_list=gene_sets_list)
+# perform_fora_analysis(sample_id_list, list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, gene_sets_list=gene_sets_list)
 
 # Load fora results
 fora_results_keggmed_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
@@ -610,7 +611,7 @@ fora_results_nonsyn_csv_path <- file.path(results_gor_path, "fora_results_reacto
 fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_reactome_lof.csv")
 
 # # Perform FORA analysis for C2_CGP Gene Sets
-# results_list <- perform_fora_analysis(list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C2", subcategory="CP:REACTOME")
+# perform_fora_analysis(sample_id_list, list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C2", subcategory="CP:REACTOME")
 
 # Load fora results
 fora_results_reactome_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
@@ -665,15 +666,15 @@ fora_results_nonsyn_csv_path <- file.path(results_gor_path, "fora_results_protea
 fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_proteasome_lof.csv")
 
 # # Load GMT file as a GeneSetCollection object
-# gene_set_collection <- getGmt(file.path(data_path, "genesets_proteasome.v2023.2.Hs.gmt"))
+# gene_sets_collection <- getGmt(file.path(data_path, "genesets_proteasome.v2023.2.Hs.gmt"))
 # 
 # # Initialize an empty list to store the results
 # gene_sets_list <- list()
 # 
 # # Iterate over each GeneSet in the GeneSetCollection
-# for (setName in names(gene_set_collection)) {
+# for (setName in names(gene_sets_collection)) {
 #   # Extract the GeneSet by its name
-#   geneSet <- gene_set_collection[[setName]]
+#   geneSet <- gene_sets_collection[[setName]]
 # 
 #   # Convert Hugo Symbols to Ensembl IDs for this GeneSet
 #   ensembl_ids <- SYMBOLtoENSEMBL(geneIds(geneSet))
@@ -686,7 +687,7 @@ fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_proteasom
 # }
 # 
 # # Perform FORA analysis for PROTEASOME Gene Sets
-# results_list <- perform_fora_analysis(list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, gene_sets_list=gene_sets_list)
+# perform_fora_analysis(sample_id_list, list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, gene_sets_list=gene_sets_list)
 
 # Load fora results
 fora_results_proteasome_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
@@ -759,15 +760,15 @@ fora_results_nonsyn_csv_path <- file.path(results_gor_path, "fora_results_combin
 fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_combinedGS_lof.csv")
 
 # Load GMT file as a GeneSetCollection object
-gene_set_collection <- getGmt(file.path(data_path, "genesets_combined.v2023.2.Hs.gmt"))
+gene_sets_collection <- getGmt(file.path(data_path, "genesets_combined.v2023.2.Hs.gmt"))
 
 # Initialize an empty list to store the results
 gene_sets_list <- list()
 
 # Iterate over each GeneSet in the GeneSetCollection
-for (setName in names(gene_set_collection)) {
+for (setName in names(gene_sets_collection)) {
   # Extract the GeneSet by its name
-  geneSet <- gene_set_collection[[setName]]
+  geneSet <- gene_sets_collection[[setName]]
 
   # Convert Hugo Symbols to Ensembl IDs for this GeneSet
   ensembl_ids <- SYMBOLtoENSEMBL(geneIds(geneSet))
@@ -779,8 +780,8 @@ for (setName in names(gene_set_collection)) {
   gene_sets_list[[setName]] <- ensembl_ids_vector
 }
 
-# # Perform FORA analysis for PROTEASOME Gene Sets
-# results_list <- perform_fora_analysis(list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, gene_sets_list=gene_sets_list)
+# # Perform FORA analysis for combined Gene Sets
+# perform_fora_analysis(sample_id_list, list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, gene_sets_list=gene_sets_list)
 
 # Load fora results
 fora_results_combinedGS_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
@@ -855,7 +856,7 @@ for (i in indices) {
   geneset_group <- names(gene_sets_list)[i:min(i+9, length(gene_sets_list))]
   
   # Define the output plot path dynamically based on the current index
-  plot_path <- file.path(figures_gor_path, paste0(global_idx, "_combinedGS_lof_bubbleplot.png"))
+  plot_path <- file.path(figures_gor_path, paste0(global_idx, "_combinedGS_lof_boxplot.png"))
   
   # Call the plotting function with the current geneset group
   combinedGS_lof_plot <- boxplot_genesets(geneset_group, response_df, fora_results_combinedGS_lof_df, plot_path, 
@@ -882,6 +883,118 @@ combinedGS_lof_plot <- heat_map_genesets(response_df, fora_results_combinedGS_lo
 # Print
 print(combinedGS_lof_plot)
 ```
+
+## Using clusterProfiler
+
+```{r, warning=FALSE, message=FALSE}
+# Define paths
+fora_results_all_csv_path <- file.path(results_gor_path, "cP_fora_results_combinedGS_all.csv")
+fora_results_nonsyn_csv_path <- file.path(results_gor_path, "cP_fora_results_combinedGS_nonsyn.csv")
+fora_results_lof_csv_path <- file.path(results_gor_path, "cP_fora_results_combinedGS_lof.csv")
+
+# Load GMT file as a GeneSetCollection object
+gene_sets_collection <- getGmt(file.path(data_path, "genesets_combined.v2023.2.Hs.gmt"))
+
+# Create an empty dataframe
+gene_sets_df <- tibble(gene_set_name = character(), gene_hs = character())
+
+# Iterate over each gene set in the collection
+for (gene_set_name in names(gene_sets_collection)) {
+  # Access the S4 object
+  gene_set <- gene_sets_collection[[gene_set_name]]
+  set_name <- gene_set@setName
+  gene_hs <- gene_set@geneIds
+  
+  # Create a temporary dataframe
+  temp_df <- tibble(
+    gene_set_name = set_name,
+    gene_hs = gene_hs
+  )
+  
+  # Bind the temp dataframe to the main dataframe
+  gene_sets_df <- bind_rows(gene_sets_df, temp_df)
+  
+  # Convert Hugo Symbols to Ensembl IDs for this GeneSet
+  gene_sets_df <- gene_sets_df %>% 
+    dplyr::mutate(ensembl_id = SYMBOLtoENSEMBL(gene_hs))
+}
+
+# Perform FORA analysis for combined Gene Sets
+results_list <- perform_cP_fora_analysis(sample_id_list, list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, gene_sets_df=gene_sets_df)
+
+# Load fora results
+cP_fora_results_combinedGS_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
+cP_fora_results_combinedGS_nonsyn_df <- read.csv(fora_results_nonsyn_csv_path, header = TRUE)[ , -1]
+cP_fora_results_combinedGS_lof_df <- read.csv(fora_results_lof_csv_path, header = TRUE)[ , -1]
+
+# Get all unique sample_id values
+unique_sample_ids <- unique(cP_fora_results_combinedGS_lof_df$sample_id)
+```
+
+```{r, warning=FALSE, message=FALSE}
+for(sample_id in unique_sample_ids) {
+  # Define the output plot path dynamically based on the current sample_id
+  plot_path <- file.path(figures_gor_path, paste0(sample_id, "_combinedGS_lof_upsetplot.png"))
+  tryCatch({
+    # Attempt to generate and print the plot
+    upset_plot <- enrichplot::upsetplot(results_list$lof[[sample_id]])
+    
+    # Print
+    print(upset_plot)
+    
+    # Save plot
+    ggsave(plot_path, upset_plot, width = 10, height = 10, dpi = 300)
+    
+  }, error = function(e) {
+    # If an error occurs, print the error message
+    cat("An error occurred with sample", sample_id, ": ", e$message, "\n")
+  })
+}
+```
+
+```{r}
+# Assuming you have two gene sets identified from the upset plot you wish to compare
+gene_set_ids <- c("GOBP_PROTEIN_K48_LINKED_DEUBIQUITINATION", "GOBP_PROTEIN_MODIFICATION_BY_SMALL_PROTEIN_REMOVAL", "GOMF_DEUBIQUITINASE_ACTIVITY", "GOMF_UBIQUITIN_LIKE_PROTEIN_PEPTIDASE_ACTIVITY", "REACTOME_DEUBIQUITINATION")
+
+# Extract gene members for each set from the enricher results
+# This step may vary depending on the exact structure of your enricher results
+gene_members <- lapply(gene_set_ids, function(set_id) {
+  genes_in_set <- results_list$lof[["MM909_14"]]@result$geneID[which(results_list$lof[["MM909_14"]]@result$ID == set_id)]
+  unlist(strsplit(genes_in_set, "/"))  # Assuming genes are separated by "/"
+})
+
+# Now, gene_members is a list where each element contains the genes for a gene set
+
+# Find shared genes between the sets
+shared_genes <- Reduce(intersect, gene_members)
+
+list_of_lof_mutations[["MM909_14"]] %>% 
+  dplyr::filter(ensembl_id %in% shared_genes)
+```
+
+I find it weird that clusterProfiler finds much less enriched GS than the other approach. Still, I investigated the intersection between some GS of patient **MM909_14**. For GS: ; I saw that they shared only 1 gene: **ENSG00000169914 (OTUD3)**. This gene is protein coding, has 3 transcripts and belongs to the **OTU (Ovarian Tumor) family deubiquitinases**. These proteins are a group of enzymes that belong to the cysteine protease class, specifically involved in the process of deubiquitination. OTU deubiquitinases play significant roles in regulating various cellular processes by reversing the ubiquitination of proteins, thus affecting protein stability, localization, and function. Through their action, OTU family deubiquitinases are involved in regulating cell cycle progression, DNA repair, signal transduction, and immune responses, making them important for maintaining cellular homeostasis and implicated in the pathogenesis of diseases, including cancer and inflammation. Link: https://grch37.ensembl.org/Homo_sapiens/Gene/Summary?g=ENSG00000169914;r=1:19882395-19912945
+
+```{r}
+# Assuming you have two gene sets identified from the upset plot you wish to compare
+gene_set_ids <- c("GOBP_POSITIVE_REGULATION_OF_PROTEIN_UBIQUITINATION", "HALLMARK_P53_PATHWAY")
+
+# Extract gene members for each set from the enricher results
+# This step may vary depending on the exact structure of your enricher results
+gene_members <- lapply(gene_set_ids, function(set_id) {
+  genes_in_set <- results_list$lof[["MM909_14"]]@result$geneID[which(results_list$lof[["MM909_14"]]@result$ID == set_id)]
+  unlist(strsplit(genes_in_set, "/"))  # Assuming genes are separated by "/"
+})
+
+# Now, gene_members is a list where each element contains the genes for a gene set
+
+# Find shared genes between the sets
+shared_genes <- Reduce(intersect, gene_members)
+
+list_of_lof_mutations[["MM909_14"]] %>% 
+  dplyr::filter(ensembl_id %in% shared_genes)
+```
+
+Link: https://grch37.ensembl.org/Homo_sapiens/Gene/Summary?db=core;g=ENSG00000171720;r=5:141000443-141016437
 
 # Session Info
 

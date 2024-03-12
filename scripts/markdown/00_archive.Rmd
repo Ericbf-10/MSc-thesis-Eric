@@ -418,6 +418,34 @@ print(nrow(removed_rows))
 list_of_drugs <- c("Vemurafenib (BRAFi)", "Dacarbazine", "Ipilimumab", "Binimetinib (MEKi) - after", "Nivolumab - after", "Pembroluzimab - after", "Selinexor - after", "Temodal", "IL-2")
 ```
 
+```{r}
+# Statistical test: Wilcoxon rank-sum test (also known as Mann-Whitney U test)
+# It does not work well, probably because I just compare 2 values (R vs NR) for each pathway. I should try giving the distribution.
+geneset_group <- names(gene_sets_list)[i:min(i+9, length(gene_sets_list))]
+
+prepared_data_df <- fora_results_combinedGS_lof_df %>%
+  dplyr::filter(pathway %in% geneset_group) %>%
+  dplyr::mutate(Gene_ratio = overlap / size, Count = overlap) %>%
+  dplyr::ungroup()
+
+# Merge response info
+combined_data <- prepared_data_df %>%
+  dplyr::left_join(response_df, by = "sample_id")
+
+# Calculate p-values for each pathway and store results, handling cases with insufficient data
+p_values <- combined_data %>%
+  dplyr::group_by(pathway) %>%
+  dplyr::summarize(p_value = ifelse(n_distinct(patient_response) > 1,
+                             wilcox.test(Count ~ patient_response, data = ., exact = FALSE)$p.value,
+                             NA_real_)) %>%
+  dplyr::ungroup()
+
+# Merge p-values back with combined_data for annotation
+combined_data <- dplyr::left_join(combined_data, p_values, by = "pathway")
+
+combined_data
+```
+
 ## Session Info
 
 ```{r}

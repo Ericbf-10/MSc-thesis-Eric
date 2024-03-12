@@ -16,7 +16,7 @@ set_lists_to_chars <- function(x) {
 
 # Convert Hugo Symbols to Entrez IDs
 SYMBOLtoENTREZ <- function(x){
-  vec=mapIds(org.Hs.eg.db,
+  vec=mapIds(EnsDb.Hsapiens.v75,
              keys=x,
              column="ENTREZID",
              keytype="SYMBOL",
@@ -30,7 +30,7 @@ SYMBOLtoENTREZ <- function(x){
 
 # Convert Entrez IDs to Hugo Symbols
 ENTREZtoSYMBOL <- function(x){
-  vec=mapIds(org.Hs.eg.db,
+  vec=mapIds(EnsDb.Hsapiens.v75,
              keys=x,
              column="SYMBOL",
              keytype="ENTREZID",
@@ -44,9 +44,9 @@ ENTREZtoSYMBOL <- function(x){
 
 # Convert Entrez IDs to Ensembl Gene IDs
 ENTREZtoENSEMBL <- function(x){
-  vec=mapIds(org.Hs.eg.db,
+  vec=mapIds(EnsDb.Hsapiens.v75,
              keys=x,
-             column="ENSEMBL",
+             column="GENEID", # = ENSEMBL
              keytype="ENTREZID",
              multiVals="first")
   repl=which(is.na(vec))
@@ -58,9 +58,9 @@ ENTREZtoENSEMBL <- function(x){
 
 # Convert Hugo Symbols to Ensembl Gene IDs
 SYMBOLtoENSEMBL <- function(x){
-  vec=mapIds(org.Hs.eg.db,
+  vec=mapIds(EnsDb.Hsapiens.v75,
              keys=x,
-             column="ENSEMBL",
+             column="GENEID", # = ENSEMBL
              keytype="SYMBOL",
              multiVals="first")
   repl=which(is.na(vec))
@@ -158,7 +158,7 @@ ubiquitin_filter <- function(mut_list, ubiquitin_df){
 }
 
 # Perform FORA analysis for a specific Human Gene Set collection
-perform_fora_analysis <- function(all_mut_list, nonsyn_mut_list, lof_mut_list, fora_results_all_csv_path, fora_results_nosnyn_csv_path, fora_results_lof_csv_path, category=NULL, subcategory=NULL, gene_sets_list=NULL) {
+perform_fora_analysis <- function(sample_id_list, all_mut_list, nonsyn_mut_list, lof_mut_list, fora_results_all_csv_path, fora_results_nosnyn_csv_path, fora_results_lof_csv_path, category=NULL, subcategory=NULL, gene_sets_list=NULL) {
   # Load required libraries
   library(msigdbr)
   library(fgsea)
@@ -205,6 +205,110 @@ perform_fora_analysis <- function(all_mut_list, nonsyn_mut_list, lof_mut_list, f
   
   fora_results_lof_df <- merge_fora_data_tables_adding_id(fora_results_lof_list)
   write.csv(fora_results_lof_df, file = fora_results_lof_csv_path, row.names = TRUE)
+}
+
+# Perform FORA analysis for a specific Human Gene Set collection using clusterProfiler
+perform_cP_fora_analysis <- function(sample_id_list, all_mut_list, nonsyn_mut_list, lof_mut_list, fora_results_all_csv_path, fora_results_nosnyn_csv_path, fora_results_lof_csv_path, category=NULL, subcategory=NULL, gene_sets_df=NULL) {
+  # Load libraries
+  library(clusterProfiler)
+  library(msigdbr)
+  library(EnsDb.Hsapiens.v75)
+  
+  if (!is.null(category)){
+    # Get a list of gene sets for the specified category with their associated genes
+    gene_sets_df <- msigdbr(species = "human", category = category, subcategory = subcategory)
+  } else if (is.null(gene_sets_df)) {
+    # Raise exception & stop execution
+    stop("category and gene_sets_list are both NULL. Please provide a 'category' or 'gene_sets_df'.")
+  }
+  
+  # Get all the Ensembl human Gene IDs
+  genes_info <- genes(EnsDb.Hsapiens.v75)
+  ensembl_hgene_ids <- unique(genes_info$gene_id)
+  
+  # Initialize dataframes to store FORA results
+  fora_results_all_df <- fora_results_nonsyn_df <- fora_results_lof_df <- data.frame() # WOW, didn't know this was possible in R!
+  
+  # Initialize lists to store FORA results
+  fora_results_all_list <- fora_results_nonsyn_list <- fora_results_lof_list <- list()
+
+  for(sample_id in sample_id_list) {
+    # Perform FORA for all mutations
+    mutated_genes_all_ids <- as.character(all_mut_list[[sample_id]]$ensembl_id)
+    fora_results_all <- enricher(
+      gene = mutated_genes_all_ids, # A character vector of your genes of interest
+      pvalueCutoff = 1, # Can choose a FDR cutoff
+      pAdjustMethod = "BH", # Method to be used for multiple testing correction
+      universe = ensembl_hgene_ids, # A character vector containing your background set genes
+      TERM2GENE = dplyr::select( # Pathway information: data frame with a term name or identifier and the gene identifiers
+        gene_sets_df,
+        gene_set_name,
+        ensembl_id
+      )
+    )
+    # Store results in a list
+    fora_results_all_list[[sample_id]] <- fora_results_all
+    
+    # Add sample_id
+    temp_fora_results_all_df <- as.data.frame(fora_results_all@result)
+    temp_fora_results_all_df$sample_id <- sample_id
+    fora_results_all_df <- rbind(fora_results_all_df, temp_fora_results_all_df)
+    
+    # Perform FORA for nonsynonymous mutations
+    mutated_genes_nonsyn_ids <- as.character(nonsyn_mut_list[[sample_id]]$ensembl_id)
+    fora_results_nonsyn <- enricher(
+      gene = mutated_genes_nonsyn_ids, # A character vector of your genes of interest
+      pvalueCutoff = 1, # Can choose a FDR cutoff
+      pAdjustMethod = "BH", # Method to be used for multiple testing correction
+      universe = ensembl_hgene_ids, # A character vector containing your background set genes
+      TERM2GENE = dplyr::select( # Pathway information: data frame with a term name or identifier and the gene identifiers
+        gene_sets_df,
+        gene_set_name,
+        ensembl_id
+      )
+    )
+    # Store results in a list
+    fora_results_nonsyn_list[[sample_id]] <- fora_results_nonsyn
+    
+    # Add sample_id
+    temp_fora_results_nonsyn_df <- as.data.frame(fora_results_nonsyn@result)
+    temp_fora_results_nonsyn_df$sample_id <- sample_id
+    fora_results_nonsyn_df <- rbind(fora_results_nonsyn_df, temp_fora_results_nonsyn_df)
+    
+    # Perform FORA for LoF mutations
+    mutated_genes_lof_ids <- as.character(lof_mut_list[[sample_id]]$ensembl_id)
+    fora_results_lof <- enricher(
+      gene = mutated_genes_lof_ids, # A character vector of your genes of interest
+      pvalueCutoff = 1, # Can choose a FDR cutoff
+      pAdjustMethod = "BH", # Method to be used for multiple testing correction
+      universe = ensembl_hgene_ids, # A character vector containing your background set genes
+      TERM2GENE = dplyr::select( # Pathway information: data frame with a term name or identifier and the gene identifiers
+        gene_sets_df,
+        gene_set_name,
+        ensembl_id
+      )
+    )
+    # Store results in a list
+    fora_results_lof_list[[sample_id]] <- fora_results_lof
+    
+    # Add sample_id
+    temp_fora_results_lof_df <- as.data.frame(fora_results_lof@result)
+    temp_fora_results_lof_df$sample_id <- sample_id
+    fora_results_lof_df <- rbind(fora_results_lof_df, temp_fora_results_lof_df)
+  }
+  
+  # Save the results to CSV files using the provided variable names
+  write.csv(fora_results_all_df, file = fora_results_all_csv_path, row.names = TRUE)
+  write.csv(fora_results_nonsyn_df, file = fora_results_nosnyn_csv_path, row.names = TRUE)
+  write.csv(fora_results_lof_df, file = fora_results_lof_csv_path, row.names = TRUE)
+  
+  # Return
+  results_lists <- list(
+    all = fora_results_all_list,
+    nonsyn = fora_results_nonsyn_list,
+    lof = fora_results_lof_list
+  )
+  return(results_lists)
 }
 
 # Bubble Plot top 5 Gene Sets across samples stratified by response
@@ -493,6 +597,106 @@ heat_map_genesets <- function(response_df, mut_df, plot_path, fig_title) {
   
   # Save plot
   ggsave(plot_path, heat_map_plot, width = 15, height = 10, dpi = 300)
+  
+  # Return
+  return(heat_map_plot)
+}
+
+# Box Plot for (a) specific Gene Set(s) across samples stratified by response
+boxplot_genesets <- function(geneset, response_df, mut_df, plot_path, fig_title, max_y) {
+  # geneset is a vector i.e. c("GS1", "GS2")
+  
+  # Prepare data: Filter Gene Set & calculate Gene ratio per sample
+  prepared_data_df <- mut_df %>%
+    dplyr::filter(pathway %in% geneset) %>%
+    dplyr::mutate(Gene_ratio = overlap / size, Count = overlap) %>%
+    dplyr::ungroup()
+  
+  # Merge response info
+  combined_data <- prepared_data_df %>%
+    dplyr::left_join(response_df, by = "sample_id")
+  
+  # Plot
+  geneset_boxplot <- ggplot(combined_data, aes(x = pathway, 
+                                               y = Count, 
+                                               fill = patient_response)) +
+    geom_boxplot(position = position_dodge(width = 0.75)) +
+    scale_fill_manual(values = c("NR" = "#E41A1C", "R" = "#377EB8"), 
+                      labels = c("NR" = "Non-Responders", "R" = "Responders")) +
+    scale_y_continuous(
+      breaks = seq(0, max_y, by = 10),
+      limits = c(NA, max_y) # Set upper limit, lower limit is NA for auto-calculation
+    ) +
+    theme_minimal() +
+    theme(
+      panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+      panel.grid.minor = element_blank(),
+      panel.background = element_rect(fill = "white", colour = "black"),
+      plot.background = element_rect(fill = "white", colour = NA),
+      legend.position = "right",
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    ) +
+    labs(title = fig_title,
+         x = "Gene Set",
+         y = "Count",
+         fill = "Patient Response")
+  
+  # Save plot
+  ggsave(plot_path, geneset_boxplot, width = 20, height = 12, dpi = 300)
+  
+  # Return the plot object
+  return(geneset_boxplot)
+}
+
+# Heat Map of top5 GS across samples stratified by response
+top5_heat_map <- function(response_df, mut_df, plot_path, fig_title) {
+  
+  # Prepare data for all samples
+  prepared_data_df <- mut_df %>%
+    dplyr::group_by(sample_id) %>%
+    dplyr::filter(padj < 0.05) %>%
+    dplyr::mutate(Gene_ratio = overlap / size,
+                  Count = overlap) %>%
+    dplyr::slice_min(order_by = padj, n = 5) %>%
+    dplyr::arrange(sample_id, desc(Count)) %>%
+    dplyr::ungroup()
+  
+  # Merge response info
+  combined_data <- prepared_data_df %>%
+    dplyr::left_join(response_df, by = "sample_id")
+  
+  # Find the total number of pathways
+  max_value <- length(unique(combined_data$pathway))
+  
+  # Define base plot width and scale factor
+  base_width <- 10 # Base width for plots
+  scale_factor <- 0.01 # Width increase per unit in max_value beyond a threshold
+  
+  # Calculate dynamic width based on max_value
+  dynamic_width <- base_width + (max_value * scale_factor)
+  
+  # Step 2: Plot with ordered sample_id and facets to distinguish "R" and "NR"
+  heat_map_plot <- ggplot(combined_data, aes(x = pathway, 
+                                             y = sample_id, 
+                                             fill = Count)) +
+    geom_tile(color = "black", linewidth = 0.2) +
+    scale_fill_gradient(low = "yellow", high = "red") + # Customize gradient colors as needed
+    theme_minimal() +
+    labs(fill = "Count", x = "Pathway", y = "Sample ID") +
+    theme(
+      panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+      panel.grid.minor = element_blank(),
+      panel.background = element_rect(fill = "white", colour = "black"),
+      plot.background = element_rect(fill = "white", colour = NA),
+      axis.text.x = element_text(angle = 45, hjust = 1)
+      ) +
+    labs(title = fig_title,
+         x = "Gene Set",
+         y = "Sample ID",
+         fill = "Count")
+
+  # Save plot
+  ggsave(plot_path, heat_map_plot, width = dynamic_width, height = 10, dpi = 300, limitsize = FALSE)
   
   # Return
   return(heat_map_plot)
