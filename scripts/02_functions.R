@@ -4,6 +4,12 @@
 
 ### Functions needed for the project
 
+## Load libraries
+library(msigdbr)
+library(fgsea)
+library(EnsDb.Hsapiens.v75)
+library(clusterProfiler)
+
 # Set data.frame columns of type list to character
 set_lists_to_chars <- function(x) {
   if(class(x) == 'list') {
@@ -68,6 +74,34 @@ SYMBOLtoENSEMBL <- function(x){
     vec[y]=x[y]
   }
   return(vec)
+}
+
+# Convert Ensembl Gene IDs to Hugo Symbols
+ENSEMBLtoSYMBOL <- function(x){
+  vec=mapIds(EnsDb.Hsapiens.v75,
+             keys=x,
+             column="SYMBOL",
+             keytype="GENEID", # = ENSEMBL
+             multiVals="first")
+  repl=which(is.na(vec))
+  for(y in repl){
+    vec[y]=x[y]
+  }
+  return(vec)
+}
+
+# Define a function to correct date-like HUGO symbols
+correct_date_like_symbols <- function(gene_ids) {
+  sapply(gene_ids, function(gene_id) {
+    if (str_detect(gene_id, "^\\w{3}-\\d{2}$")) {  # Detects patterns like Mar-01
+      parts <- unlist(str_split(gene_id, "-"))
+      # Reverse the parts and remove leading zeros from the day part
+      corrected_id <- paste0(as.integer(parts[2]), "-", parts[1])
+      return(corrected_id)
+    } else {
+      return(gene_id)  # Return the original ID if it doesn't match the pattern
+    }
+  })
 }
 
 # Bar Plot that summarizes the mutation count for each patient
@@ -159,10 +193,6 @@ ubiquitin_filter <- function(mut_list, ubiquitin_df){
 
 # Perform FORA analysis for a specific Human Gene Set collection
 perform_fora_analysis <- function(sample_id_list, all_mut_list, nonsyn_mut_list, lof_mut_list, fora_results_all_csv_path, fora_results_nosnyn_csv_path, fora_results_lof_csv_path, category=NULL, subcategory=NULL, gene_sets_list=NULL) {
-  # Load required libraries
-  library(msigdbr)
-  library(fgsea)
-  library(EnsDb.Hsapiens.v75)
   
   if (!is.null(category)){
     # Get a list of gene sets for the specified category with their associated genes
@@ -209,10 +239,6 @@ perform_fora_analysis <- function(sample_id_list, all_mut_list, nonsyn_mut_list,
 
 # Perform FORA analysis for a specific Human Gene Set collection using clusterProfiler
 perform_cP_fora_analysis <- function(sample_id_list, all_mut_list, nonsyn_mut_list, lof_mut_list, fora_results_all_csv_path, fora_results_nosnyn_csv_path, fora_results_lof_csv_path, category=NULL, subcategory=NULL, gene_sets_df=NULL) {
-  # Load libraries
-  library(clusterProfiler)
-  library(msigdbr)
-  library(EnsDb.Hsapiens.v75)
   
   if (!is.null(category)){
     # Get a list of gene sets for the specified category with their associated genes

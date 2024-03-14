@@ -1,0 +1,322 @@
+---
+title: "Impact of dysfunctional ubiquitination in response to cancer immunotherapy"
+subtitle: <center> Somatic mutations analysis - Ubiquitin custom Gene Sets </center>
+author: "Eric Bautista Farrerons (s212514)"
+date: '`r paste("First created on March 2024. Updated on ", format(Sys.Date(), "%d %B %Y"))`'
+output:
+  html_document:
+    css: style.css
+    code_folding: hide
+    fig_caption: yes
+    toc: yes
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    toc_depth: 4
+    number_sections: true
+---
+
+# Load data
+
+```{r, message=FALSE}
+### Load required libraries
+library(readxl)
+library(tidyverse)
+library(purrr)
+library(dplyr)
+library(knitr)
+library(DT)
+library(httr)
+library(jsonlite)
+library(stringr)
+library(GSEABase)
+library(HGNChelper)
+
+### Load functions
+source(file = "../02_functions.R")
+
+### Define paths
+current_dir <- getwd()
+data_path <- file.path(current_dir,
+                       "../../data/_raw")
+results_pc_path <- file.path(current_dir,
+                              "../../results/patient_characteristics/output")
+results_fip_path <- file.path(current_dir,
+                              "../../results/somatic_mutation_analysis/functional_impact_prediction/output")
+results_ubgenesets_path <- file.path(current_dir, 
+                                 "../../results/somatic_mutation_analysis/ubiquitin_custom_GS/output")
+
+# Create the folder if it does not exist
+if(!file.exists(results_ubgenesets_path)) {
+  dir.create(results_ubgenesets_path, recursive = TRUE)
+}
+
+figures_ubgenesets_path <- file.path(current_dir, 
+                                 "../../results/somatic_mutation_analysis/ubiquitin_custom_GS/figures")
+
+# Create the folder if it does not exist
+if(!file.exists(figures_ubgenesets_path)) {
+  dir.create(figures_ubgenesets_path, recursive = TRUE)
+}
+
+maf_df_path <- file.path(results_fip_path, "all_mutations.csv") # All mutations df
+nonsyn_df_path <- file.path(results_fip_path, "nonsyn_mutations.csv") # Nonsyn mutations df
+lof_df_path <- file.path(results_fip_path, "lof_mutations_reduced.csv") # LoF mutations df
+
+# Sup1 data
+sup1_response_path <- file.path(results_pc_path, 
+                           "sup1_response.csv")
+### Read data & wrangle
+
+# Read 3 lists of mutations
+
+# All
+maf_df_annotated <- read.csv(maf_df_path, header = TRUE)[ , -1]
+list_of_all_mutations <- split(maf_df_annotated, maf_df_annotated$sample_id
+                               )
+# Nonsyn
+nonsyn_df_annotated <- read.csv(nonsyn_df_path, header = TRUE)[ , -1]
+list_of_nonsyn_mutations <- split(nonsyn_df_annotated, nonsyn_df_annotated$sample_id)
+
+# LoF
+lof_df_annotated <- read.csv(lof_df_path, header = TRUE)[ , -1]
+list_of_lof_mutations <- split(lof_df_annotated, lof_df_annotated$sample_id)
+
+# Get the list of patient IDs
+sample_id_list <- unique(maf_df_annotated$sample_id)
+
+## Read sup1_response.csv
+sup1_response_df <- read.csv(sup1_response_path)[ , -1] # Drop first column
+
+# df to merge response info later
+response_df <- sup1_response_df %>% 
+  dplyr::rename(sample_id = Sample.ID,
+                patient_response = Patient.Response) %>% 
+  dplyr::select(sample_id, patient_response)
+
+# Create a list of Responders and Non-responders
+sample_id_lists <- split(sup1_response_df$Sample.ID, 
+                         sup1_response_df$Patient.Response) # Split the "Sample.ID" values into lists based on "Patient.Response"
+
+r_sample_ids <- sample_id_lists$R
+nr_sample_ids <- sample_id_lists$NR
+```
+
+# Correcting Hugo Symbols in input data
+
+```{r, message=FALSE, warning=FALSE}
+# Load the GMT file
+gene_sets_collection <- getGmt(file.path(data_path, "ubgenes.gmt"))
+
+# Initialize an empty data frame for gene IDs
+corrected_hsymbols <- data.frame()
+
+# Extract gene sets and their descriptions
+for (gene_set_id in names(gene_sets_collection)) {
+  gene_set <- gene_sets_collection[[gene_set_id]]
+  gene_ids <- geneIds(gene_set)
+  
+  # Replace "/" with "-" in gene IDs
+  gene_ids <- gsub("/", "-", gene_ids)
+  
+  # Reverse date-like hugo symbols
+  gene_ids <- correct_date_like_symbols(gene_ids)
+  
+  # Create a temporary data frame for this gene set
+  temp_df <- checkGeneSymbols(gene_ids)
+  
+  # Combine with the main data frame
+  corrected_hsymbols <- rbind(corrected_hsymbols, temp_df)
+}
+
+# Split the gene_id where "///" is found and keep only the second part (if exists)
+corrected_hsymbols$Suggested.Symbol <- sapply(str_split(corrected_hsymbols$Suggested.Symbol, " /// "), function(x) {
+  if (length(x) > 1) {
+    # If there's more than one part, keep the second one
+    return(trimws(x[2]))
+  } else {
+    # If there's only one part, keep it as is
+    return(trimws(x[1]))
+  }
+})
+
+corrected_hsymbols <- corrected_hsymbols %>% 
+  dplyr::rename(c(hugo_symbol = x, 
+                  corrected_hugo_symbol = Suggested.Symbol)) %>% 
+  dplyr::select(hugo_symbol, corrected_hugo_symbol)
+```
+
+# Filtering lists to only include Ubiquitin-related genes
+
+```{r}
+corrected_hsymbols_updated %>% 
+  dplyr::filter(!str_detect(ensembl_id, "^ENSG"))
+```
+
+```{r, message=FALSE, warning=FALSE}
+# Map HUGO symbols to Ensembl Gene IDs
+corrected_hsymbols$ensembl_id <- SYMBOLtoENSEMBL(corrected_hsymbols$corrected_hugo_symbol)
+
+# Check missing Ensembl IDs
+missing_ensembl <- corrected_hsymbols %>% 
+  dplyr::filter(!str_detect(ensembl_id, "^ENSG"))
+
+# Find them manually and update df
+missing_ensembl <- missing_ensembl %>%
+  dplyr::mutate(corrected_hugo_symbol = case_when(
+    hugo_symbol == "UBE2L5" ~ "UBE2L5P",
+    hugo_symbol == "BABAM2" ~ "BRE",
+    hugo_symbol == "COP1" ~ "RFWD2",
+    hugo_symbol == "DCAF1" ~ "VPRBP",
+    hugo_symbol == "DMAC2" ~ "ATP5SL",
+    hugo_symbol == "ELOB" ~ "TCEB2",
+    hugo_symbol == "FBH1" ~ "FBXO18",
+    hugo_symbol == "FBXL21P" ~ "FBXL21",
+    hugo_symbol == "MARCHF6" ~ "MARCH6",
+    hugo_symbol == "1-Mar" ~ "MARCH1",
+    hugo_symbol == "10-Mar" ~ "MARCH10",
+    hugo_symbol == "11-Mar" ~ "MARCH11",
+    hugo_symbol == "2-Mar" ~ "MARCH2",
+    hugo_symbol == "3-Mar" ~ "MARCH3",
+    hugo_symbol == "4-Mar" ~ "MARCH4",
+    hugo_symbol == "5-Mar" ~ "MARCH5",
+    hugo_symbol == "6-Mar" ~ "MARCH6",
+    hugo_symbol == "7-Mar" ~ "MARCH7",
+    hugo_symbol == "8-Mar" ~ "MARCH8",
+    hugo_symbol == "9-Mar" ~ "MARCH9",
+    hugo_symbol == "PARK2" ~ "PARK2",
+    hugo_symbol == "RFWD2" ~ "RFWD2",
+    hugo_symbol == "RNF212B" ~ "C14orf164",
+    hugo_symbol == "RNF219" ~ "RNF219",
+    hugo_symbol == "RNF225" ~ "RNF225",
+    hugo_symbol == "TRIM75P" ~ "TRIM75P",
+    hugo_symbol == "ZNF645" ~ "ZNF645",
+    hugo_symbol == "USP17L1" ~ "USP17L1P",
+    hugo_symbol == "OTULIN" ~ "FAM105B",
+    TRUE ~ corrected_hugo_symbol
+  ),
+  ensembl_id = case_when(
+    hugo_symbol == "UBE2L5" ~ "ENSG00000236444",
+    hugo_symbol == "BABAM2" ~ "ENSG00000158019",
+    hugo_symbol == "COP1" ~ "ENSG00000143207",
+    hugo_symbol == "DCAF1" ~ "ENSG00000145041",
+    hugo_symbol == "DMAC2" ~ "ENSG00000105341",
+    hugo_symbol == "ELOB" ~ "ENSG00000103363",
+    hugo_symbol == "FBH1" ~ "ENSG00000134452",
+    hugo_symbol == "FBXL21P" ~ "ENSG00000164616",
+    hugo_symbol == "MARCHF6" ~ "ENSG00000145495",
+    hugo_symbol == "1-Mar" ~ "ENSG00000145416",
+    hugo_symbol == "10-Mar" ~ "ENSG00000173838",
+    hugo_symbol == "11-Mar" ~ "ENSG00000183654",
+    hugo_symbol == "2-Mar" ~ "ENSG00000099785",
+    hugo_symbol == "3-Mar" ~ "ENSG00000173926",
+    hugo_symbol == "4-Mar" ~ "ENSG00000144583",
+    hugo_symbol == "5-Mar" ~ "ENSG00000198060",
+    hugo_symbol == "6-Mar" ~ "ENSG00000145495",
+    hugo_symbol == "7-Mar" ~ "ENSG00000136536",
+    hugo_symbol == "8-Mar" ~ "ENSG00000165406",
+    hugo_symbol == "9-Mar" ~ "ENSG00000139266",
+    hugo_symbol == "PARK2" ~ "ENSG00000185345",
+    hugo_symbol == "RFWD2" ~ "ENSG00000143207",
+    hugo_symbol == "RNF212B" ~ "ENSG00000215277",
+    hugo_symbol == "RNF219" ~ "ENSG00000152193",
+    hugo_symbol == "RNF225" ~ "ENSG00000269855",
+    hugo_symbol == "TRIM75P" ~ "ENSG00000250374",
+    hugo_symbol == "ZNF645" ~ "ENSG00000175809",
+    hugo_symbol == "USP17L1" ~ "ENSG00000230549",
+    hugo_symbol == "OTULIN" ~ "ENSG00000154124",
+    TRUE ~ ensembl_id
+  ))
+
+# Merge the dataframes
+corrected_hsymbols_updated <- corrected_hsymbols %>%
+  left_join(dplyr::select(missing_ensembl, 
+                          hugo_symbol, 
+                          new_corrected_hugo_symbol = corrected_hugo_symbol, 
+                          new_ensembl_id = ensembl_id),
+            by = "hugo_symbol")
+
+# Update the values based on the join
+corrected_hsymbols_updated <- corrected_hsymbols_updated %>%
+  dplyr::mutate(
+    corrected_hugo_symbol = ifelse(!is.na(new_corrected_hugo_symbol), new_corrected_hugo_symbol, corrected_hugo_symbol),
+    ensembl_id = ifelse(!is.na(new_ensembl_id), new_ensembl_id, ensembl_id)
+    ) %>%
+  dplyr::select(-new_corrected_hugo_symbol, -new_ensembl_id)
+
+# Extract the ensembl_id column to do the filtering
+ubiquitin_df <- corrected_hsymbols_updated %>% 
+  dplyr::select(ensembl_id)
+ub_genes_unique <- unique(corrected_hsymbols_updated$ensembl_id)
+
+# Filter for ubiquitin genes in all the mutation lists
+list_of_all_ub_mutations <- ubiquitin_filter(list_of_all_mutations, ubiquitin_df)
+list_of_nonsyn_ub_mutations <- ubiquitin_filter(list_of_nonsyn_mutations, ubiquitin_df)
+list_of_lof_ub_mutations <- ubiquitin_filter(list_of_lof_mutations, ubiquitin_df)
+
+# Bind rows to re-generate the dataframes
+all_df_ubiquitin <- bind_rows(list_of_all_ub_mutations)
+nonsyn_df_ubiquitin <- bind_rows(list_of_nonsyn_ub_mutations)
+lof_df_ubiquitin <- bind_rows(list_of_lof_ub_mutations)
+
+# Get all unique sample_id values
+unique_sample_ids <- unique(list_of_lof_ub_mutations$sample_id)
+```
+
+# Summary of mutations per patient
+
+```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=12}
+# Define output path
+mm909_sum_plot_path <- file.path(figures_ubgenesets_path,
+                              "mm909_sum_plot.png")
+
+# Summary plot
+mm909_sum_plot <- sum_plot(all_df_ubiquitin, nonsyn_df_ubiquitin, lof_df_ubiquitin, mm909_sum_plot_path)
+
+# Display
+print(mm909_sum_plot)
+```
+
+Sample MM909_47 does not have any Ubiquitin-related gene, and MM909_14, MM909_36 don't have any LoF on ubiquitin genes.
+
+# Create a binary matrix (LoF - Ubiquitin)
+
+```{r, message=FALSE, warning=FALSE}
+# Create a dataframe for the matrix, initialize with ensembl_id and hugo_symbol, fill 0 for samples
+lof_ub_binary <- data.frame(ensembl_id = ub_genes_unique, hugo_symbol = rep(NA, length(ub_genes_unique)))
+
+# For each sample_id, add a column to lof_ub_binary and initialize with 0
+for (sample_id in unique(lof_df_ubiquitin$sample_id)) {
+  lof_ub_binary[[sample_id]] <- 0
+}
+
+# Map hugo_symbols to the corresponding ensembl_id
+hugo_map <- lof_df_ubiquitin[!duplicated(lof_df_ubiquitin$ensembl_id), c("ensembl_id", "hugo_symbol")]
+lof_ub_binary$hugo_symbol <- hugo_map$hugo_symbol[match(lof_ub_binary$ensembl_id, hugo_map$ensembl_id)]
+
+# Fill the matrix with 1s where appropriate
+for (i in 1:nrow(lof_df_ubiquitin)) {
+  row <- lof_df_ubiquitin[i, ]
+  if (row$ensembl_id %in% lof_ub_binary$ensembl_id) {
+    lof_ub_binary[row$ensembl_id == lof_ub_binary$ensembl_id, row$sample_id] <- 1
+  }
+}
+
+# Annotate missing Hugo Symbols with Ensembl Gene IDs
+missing_hsymbols <- is.na(lof_ub_binary$hugo_symbol)
+new_hsymbols <- ENSEMBLtoSYMBOL(lof_ub_binary$ensembl_id[missing_hsymbols])
+lof_ub_binary$hugo_symbol[missing_hsymbols] <- new_hsymbols
+
+# Save the lof_binary into a file
+lof_ub_binary_out_path <- file.path(results_ubgenesets_path, 
+                      "lof_ub_binary.csv")
+write.csv(lof_ub_binary, file = lof_ub_binary_out_path, row.names = TRUE)
+
+##### TO DO: Annotate mutated genes with Aimilia's code
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

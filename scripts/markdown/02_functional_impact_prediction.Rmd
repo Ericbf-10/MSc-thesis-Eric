@@ -30,7 +30,6 @@ library(httr)
 library(jsonlite)
 library(stringr)
 library(AnnotationDbi)
-library(org.Hs.eg.db)
 library(limma)
 
 ### Load functions
@@ -303,6 +302,16 @@ list_of_lof_mutations <- split(lof_vep_df, lof_vep_df$sample_id)
 lof_vep_out_path <- file.path(results_fip_path, 
                       "lof_mutations.csv")
 write.csv(lof_vep_df, file = lof_vep_out_path, row.names = TRUE)
+
+lof_vep_df_reduced <- lof_vep_df %>% 
+  dplyr::rename(hugo_symbol = SYMBOL) %>% 
+  dplyr::select(sample_id, ensembl_id, entrez_id, hugo_symbol, Location, Allele, Liberal_consequence) %>% 
+  dplyr::distinct()
+  
+# Save the lof_vep_df_reduced into a file
+lof_vep_reduced_out_path <- file.path(results_fip_path, 
+                      "lof_mutations_reduced.csv")
+write.csv(lof_vep_df_reduced, file = lof_vep_reduced_out_path, row.names = TRUE)
 ```
 
 # Calculate TMB per patient

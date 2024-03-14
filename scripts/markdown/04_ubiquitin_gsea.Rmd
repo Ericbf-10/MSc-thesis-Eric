@@ -2,7 +2,7 @@
 title: "Impact of dysfunctional ubiquitination in response to cancer immunotherapy"
 subtitle: <center> Somatic mutations analysis - Ubiquitin Gene Overrepresentation Analysis </center>
 author: "Eric Bautista Farrerons (s212514)"
-date: '`r paste("First created on January 2024. Updated on ", format(Sys.Date(), "%d %B %Y"))`'
+date: '`r paste("First created on February 2024. Updated on ", format(Sys.Date(), "%d %B %Y"))`'
 output:
   html_document:
     css: style.css
@@ -30,7 +30,6 @@ library(httr)
 library(jsonlite)
 library(stringr)
 library(GSEABase)
-library(org.Hs.eg.db)
 
 ### Load functions
 source(file = "../02_functions.R")
@@ -61,7 +60,7 @@ if(!file.exists(figures_ubgsea_path)) {
 
 maf_df_path <- file.path(results_fip_path, "all_mutations.csv") # All mutations df
 nonsyn_df_path <- file.path(results_fip_path, "nonsyn_mutations.csv") # Nonsyn mutations df
-lof_df_path <- file.path(results_fip_path, "lof_mutations.csv") # LoF mutations df
+lof_df_path <- file.path(results_fip_path, "lof_mutations_reduced.csv") # LoF mutations df
 
 # Sup1 data
 sup1_response_path <- file.path(results_pc_path, 

@@ -31,7 +31,6 @@ library(httr)
 library(jsonlite)
 library(stringr)
 library(GSEABase)
-library(org.Hs.eg.db)
 
 ### Load functions
 source(file = "../02_functions.R")
@@ -64,7 +63,7 @@ if(!file.exists(figures_gor_path)) {
 
 maf_df_path <- file.path(results_fip_path, "all_mutations.csv") # All mutations df
 nonsyn_df_path <- file.path(results_fip_path, "nonsyn_mutations.csv") # Nonsyn mutations df
-lof_df_path <- file.path(results_fip_path, "lof_mutations.csv") # LoF mutations df
+lof_df_path <- file.path(results_fip_path, "lof_mutations_reduced.csv") # LoF mutations df
 
 # Sup1 data
 sup1_response_path <- file.path(results_pc_path, 
@@ -993,7 +992,7 @@ shared_genes <- Reduce(intersect, gene_members)
 list_of_lof_mutations[["MM909_14"]] %>% 
   dplyr::filter(ensembl_id %in% shared_genes)
 ```
-
+I investigated the intersection between some GS of patient **MM909_14**. For GS: ; I saw that they shared only 1 gene: **ENSG00000171720 (HDAC3)**. This gene is protein coding, has 16 transcripts and belongs to the **Class I histone deacetylases (HDACs).**. These proteins are a subgroup of the HDAC family, enzymes that play a crucial role in the regulation of gene expression by removing acetyl groups from lysine residues on histone proteins. This deacetylation leads to a more compact chromatin structure, resulting in transcriptional repression. Class I HDACs, which include HDAC1, HDAC2, HDAC3, and HDAC8, are primarily located in the nucleus and are involved in various cellular processes such as cell cycle progression, differentiation, and apoptosis. Their activity is tightly regulated, and dysregulation of Class I HDACs has been linked to the development and progression of several diseases, including cancer, where they can influence tumor suppressor genes and oncogenes.
 Link: https://grch37.ensembl.org/Homo_sapiens/Gene/Summary?db=core;g=ENSG00000171720;r=5:141000443-141016437
 
 # Session Info

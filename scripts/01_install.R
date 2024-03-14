@@ -34,6 +34,9 @@ if (!require("stringr")) {
 if (!require("msigdbr")) {
   install.packages("msigdbr")
 }
+if (!require("HGNChelper")) {
+  install.packages("HGNChelper")
+}
 if (!requireNamespace("BiocManager", quietly = TRUE)) {
   install.packages("BiocManager")
 }
