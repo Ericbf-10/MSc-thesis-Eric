@@ -9,6 +9,7 @@ library(msigdbr)
 library(fgsea)
 library(EnsDb.Hsapiens.v75)
 library(clusterProfiler)
+library(GO.db)
 
 # Set data.frame columns of type list to character
 set_lists_to_chars <- function(x) {
@@ -104,8 +105,24 @@ correct_date_like_symbols <- function(gene_ids) {
   })
 }
 
+# Function to search GO terms by keyword
+searchGOTerms <- function(keyword) {
+  all_terms <- as.list(GOTERM)
+  matches <- sapply(all_terms, function(term) grepl(keyword, Term(term), ignore.case = TRUE))
+  matched_terms <- all_terms[matches]
+  data.frame(
+    go_id = names(matched_terms),
+    go_term = sapply(matched_terms, Term),
+    definition = sapply(matched_terms, Definition),
+    go_category = sapply(matched_terms, Ontology),
+    stringsAsFactors = FALSE
+  )
+}
+
 # Bar Plot that summarizes the mutation count for each patient
-sum_plot <- function(all_mut_df, nonsyn_mut_df, lof_mut_df, plot_path) {
+sum_plot <- function(response_df, all_mut_df, nonsyn_mut_df, lof_mut_df, plot_path) {
+  all_sample_ids <- unique(c(all_mut_df$sample_id, nonsyn_mut_df$sample_id, lof_mut_df$sample_id))
+  
   # Prepare a combined_df
   combined_df <- bind_rows(
     all_mut_df %>% mutate(source = 'All'),
@@ -120,19 +137,25 @@ sum_plot <- function(all_mut_df, nonsyn_mut_df, lof_mut_df, plot_path) {
   # Recalculate the counts
   count_df <- combined_df %>%
     group_by(sample_id, source) %>%
-    summarise(count = n(), .groups = 'drop')
+    summarise(count = n(), .groups = 'drop') %>%
+    complete(sample_id = all_sample_ids, source, fill = list(count = 0)) %>% # Ensure every sample_id and source combination is represented
+    ungroup()
+    
+  # Merge response info
+  combined_data <- count_df %>%
+    dplyr::left_join(response_df, by = "sample_id")
   
   # Calculate the maximum count to set the y-axis limit dynamically
-  max_count <- max(count_df$count, na.rm = TRUE)
+  max_count <- max(combined_data$count, na.rm = TRUE)
   buffer <- max_count * 0.1 # Add 10% buffer to the maximum count for the labels
   
   # Generate the plot with the adjusted source ordering
-  bar_plot <- ggplot(count_df, aes(x = source, y = count, fill = source)) +
+  bar_plot <- ggplot(combined_data, aes(x = source, y = count, fill = source)) +
     geom_bar(stat = "identity", position = position_dodge()) +
     geom_text(aes(label = count), vjust = -0.5, position = position_dodge(0.9)) +
     scale_fill_manual(values = c("All" = "darkblue", "Nonsyn" = "darkred", "LoF" = "darkgreen"),
                       name = "Mutation Type") +
-    facet_wrap(~ sample_id, scales = "free_x") +
+    facet_wrap(~ paste(sample_id, patient_response), scales = "free_x") +
     labs(x = "Mutation Type", 
          y = "Count", 
          title = "Number of mutations per patient") +

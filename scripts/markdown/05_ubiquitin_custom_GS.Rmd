@@ -31,6 +31,9 @@ library(jsonlite)
 library(stringr)
 library(GSEABase)
 library(HGNChelper)
+library(mygene)
+library(GO.db)
+library(AnnotationDbi)
 
 ### Load functions
 source(file = "../02_functions.R")
@@ -148,11 +151,6 @@ corrected_hsymbols <- corrected_hsymbols %>%
 
 # Filtering lists to only include Ubiquitin-related genes
 
-```{r}
-corrected_hsymbols_updated %>% 
-  dplyr::filter(!str_detect(ensembl_id, "^ENSG"))
-```
-
 ```{r, message=FALSE, warning=FALSE}
 # Map HUGO symbols to Ensembl Gene IDs
 corrected_hsymbols$ensembl_id <- SYMBOLtoENSEMBL(corrected_hsymbols$corrected_hugo_symbol)
@@ -161,40 +159,41 @@ corrected_hsymbols$ensembl_id <- SYMBOLtoENSEMBL(corrected_hsymbols$corrected_hu
 missing_ensembl <- corrected_hsymbols %>% 
   dplyr::filter(!str_detect(ensembl_id, "^ENSG"))
 
-# Find them manually and update df
+# Find them manually and update df (for now only Ensembl Gene IDs)
 missing_ensembl <- missing_ensembl %>%
-  dplyr::mutate(corrected_hugo_symbol = case_when(
-    hugo_symbol == "UBE2L5" ~ "UBE2L5P",
-    hugo_symbol == "BABAM2" ~ "BRE",
-    hugo_symbol == "COP1" ~ "RFWD2",
-    hugo_symbol == "DCAF1" ~ "VPRBP",
-    hugo_symbol == "DMAC2" ~ "ATP5SL",
-    hugo_symbol == "ELOB" ~ "TCEB2",
-    hugo_symbol == "FBH1" ~ "FBXO18",
-    hugo_symbol == "FBXL21P" ~ "FBXL21",
-    hugo_symbol == "MARCHF6" ~ "MARCH6",
-    hugo_symbol == "1-Mar" ~ "MARCH1",
-    hugo_symbol == "10-Mar" ~ "MARCH10",
-    hugo_symbol == "11-Mar" ~ "MARCH11",
-    hugo_symbol == "2-Mar" ~ "MARCH2",
-    hugo_symbol == "3-Mar" ~ "MARCH3",
-    hugo_symbol == "4-Mar" ~ "MARCH4",
-    hugo_symbol == "5-Mar" ~ "MARCH5",
-    hugo_symbol == "6-Mar" ~ "MARCH6",
-    hugo_symbol == "7-Mar" ~ "MARCH7",
-    hugo_symbol == "8-Mar" ~ "MARCH8",
-    hugo_symbol == "9-Mar" ~ "MARCH9",
-    hugo_symbol == "PARK2" ~ "PARK2",
-    hugo_symbol == "RFWD2" ~ "RFWD2",
-    hugo_symbol == "RNF212B" ~ "C14orf164",
-    hugo_symbol == "RNF219" ~ "RNF219",
-    hugo_symbol == "RNF225" ~ "RNF225",
-    hugo_symbol == "TRIM75P" ~ "TRIM75P",
-    hugo_symbol == "ZNF645" ~ "ZNF645",
-    hugo_symbol == "USP17L1" ~ "USP17L1P",
-    hugo_symbol == "OTULIN" ~ "FAM105B",
-    TRUE ~ corrected_hugo_symbol
-  ),
+  dplyr::mutate(
+    # corrected_hugo_symbol = case_when(
+  #   hugo_symbol == "UBE2L5" ~ "UBE2L5P",
+  #   hugo_symbol == "BABAM2" ~ "BRE",
+  #   hugo_symbol == "COP1" ~ "RFWD2",
+  #   hugo_symbol == "DCAF1" ~ "VPRBP",
+  #   hugo_symbol == "DMAC2" ~ "ATP5SL",
+  #   hugo_symbol == "ELOB" ~ "TCEB2",
+  #   hugo_symbol == "FBH1" ~ "FBXO18",
+  #   hugo_symbol == "FBXL21P" ~ "FBXL21",
+  #   hugo_symbol == "MARCHF6" ~ "MARCH6",
+  #   hugo_symbol == "1-Mar" ~ "MARCH1",
+  #   hugo_symbol == "10-Mar" ~ "MARCH10",
+  #   hugo_symbol == "11-Mar" ~ "MARCH11",
+  #   hugo_symbol == "2-Mar" ~ "MARCH2",
+  #   hugo_symbol == "3-Mar" ~ "MARCH3",
+  #   hugo_symbol == "4-Mar" ~ "MARCH4",
+  #   hugo_symbol == "5-Mar" ~ "MARCH5",
+  #   hugo_symbol == "6-Mar" ~ "MARCH6",
+  #   hugo_symbol == "7-Mar" ~ "MARCH7",
+  #   hugo_symbol == "8-Mar" ~ "MARCH8",
+  #   hugo_symbol == "9-Mar" ~ "MARCH9",
+  #   hugo_symbol == "PARK2" ~ "PARK2",
+  #   hugo_symbol == "RFWD2" ~ "RFWD2",
+  #   hugo_symbol == "RNF212B" ~ "C14orf164",
+  #   hugo_symbol == "RNF219" ~ "RNF219",
+  #   hugo_symbol == "RNF225" ~ "RNF225",
+  #   hugo_symbol == "TRIM75P" ~ "TRIM75P",
+  #   hugo_symbol == "ZNF645" ~ "ZNF645",
+  #   hugo_symbol == "USP17L1" ~ "USP17L1P",
+  #   hugo_symbol == "OTULIN" ~ "FAM105B",
+  #   TRUE ~ corrected_hugo_symbol
+  # ),
   ensembl_id = case_when(
     hugo_symbol == "UBE2L5" ~ "ENSG00000236444",
     hugo_symbol == "BABAM2" ~ "ENSG00000158019",
@@ -232,22 +231,26 @@ missing_ensembl <- missing_ensembl %>%
 corrected_hsymbols_updated <- corrected_hsymbols %>%
   left_join(dplyr::select(missing_ensembl, 
                           hugo_symbol, 
-                          new_corrected_hugo_symbol = corrected_hugo_symbol, 
+                          # new_corrected_hugo_symbol = corrected_hugo_symbol, 
                           new_ensembl_id = ensembl_id),
             by = "hugo_symbol")
 
 # Update the values based on the join
 corrected_hsymbols_updated <- corrected_hsymbols_updated %>%
   dplyr::mutate(
-    corrected_hugo_symbol = ifelse(!is.na(new_corrected_hugo_symbol), new_corrected_hugo_symbol, corrected_hugo_symbol),
+    # corrected_hugo_symbol = ifelse(!is.na(new_corrected_hugo_symbol), new_corrected_hugo_symbol, corrected_hugo_symbol),
     ensembl_id = ifelse(!is.na(new_ensembl_id), new_ensembl_id, ensembl_id)
     ) %>%
-  dplyr::select(-new_corrected_hugo_symbol, -new_ensembl_id)
+  dplyr::select(
+    # -new_corrected_hugo_symbol, 
+    -new_ensembl_id)
 
 # Extract the ensembl_id column to do the filtering
 ubiquitin_df <- corrected_hsymbols_updated %>% 
   dplyr::select(ensembl_id)
-ub_genes_unique <- unique(corrected_hsymbols_updated$ensembl_id)
+
+# Get ubiquitin unique ensembl ids
+ub_ensembl_ids <- unique(corrected_hsymbols_updated$ensembl_id)
 
 # Filter for ubiquitin genes in all the mutation lists
 list_of_all_ub_mutations <- ubiquitin_filter(list_of_all_mutations, ubiquitin_df)
@@ -271,7 +274,7 @@ mm909_sum_plot_path <- file.path(figures_ubgenesets_path,
                               "mm909_sum_plot.png")
 
 # Summary plot
-mm909_sum_plot <- sum_plot(all_df_ubiquitin, nonsyn_df_ubiquitin, lof_df_ubiquitin, mm909_sum_plot_path)
+mm909_sum_plot <- sum_plot(response_df, all_df_ubiquitin, nonsyn_df_ubiquitin, lof_df_ubiquitin, mm909_sum_plot_path)
 
 # Display
 print(mm909_sum_plot)
@@ -279,11 +282,334 @@ print(mm909_sum_plot)
 
 Sample MM909_47 does not have any Ubiquitin-related gene, and MM909_14, MM909_36 don't have any LoF on ubiquitin genes.
 
+# Build a DB of GO terms for ubiquitin-related Bio Processes (based on gene list)
+
+#### Define categories. Define which parent terms I want to use and get offspring.
+#### Build the DB with Category > Parent > Children.
+#### Get all GO.db ubiquitin terms.
+#### Iterate through the ubiquitin terms from GO.db and annotate the parent terms. Make a data.frame.
+#### Check the ones that have +1 GO parent term and reduce to 1.
+#### Get Ensembl IDs related to those GO terms. 
+
+```{r, message=FALSE, warning=FALSE}
+#1 Define categories and parents
+
+# Categories (as character)
+ub_categories <- c("ubiquitination", "deubiquitination", "ubiquitin_independent")
+# ub_categories <- setNames(as.list(ub_categories), ub_categories)
+
+# Parents (as character)
+ub_parent_terms <- c("GO:0016567", "GO:0016579", "GO:0006511", "GO:0010499", "GO:0010992", "GO:0070086", "GO:0120323", "GO:0031397", "GO:0031398", "GO:2000059", "GO:2000060") # "GO:0051438" --> removed because regulation can be positive or negative
+# ub_parent_terms <- setNames(as.list(ub_parent_terms), ub_parent_terms)
+
+# Children (as list)
+all_offspring <- as.list(GOBPOFFSPRING) # Get the offspring terms
+parent2child_list <- map(ub_parent_terms, function(x) {
+  offspring <- all_offspring[[x]]
+  # If offspring has elements, return it (with parent itself)
+  if (length(offspring) > 1) {
+    return(c(x, offspring))
+  # If the offspring is not NA, return it (with parent itself)
+  } else if (!is.na(offspring)) {
+    return(c(x, offspring))
+  # If the offspring is NA, return the GO term itself wrapped in a list
+  } else {
+    return(x)
+  }
+})
+names(parent2child_list) <- ub_parent_terms
+
+#2 Build DB with Category > Parent > Children
+ub_db <- list(
+  ubiquitination = list(
+    `GO:0016567` = parent2child_list[["GO:0016567"]],
+    `GO:0006511` = parent2child_list[["GO:0006511"]],
+    `GO:0010992` = parent2child_list[["GO:0010992"]],
+    `GO:0070086` = parent2child_list[["GO:0070086"]],
+    `GO:0120323` = parent2child_list[["GO:0120323"]],
+    `GO:0031398` = parent2child_list[["GO:0031398"]],
+    `GO:2000060` = parent2child_list[["GO:2000060"]]
+  ),
+  deubiquitination = list(
+    `GO:0016579` = parent2child_list[["GO:0016579"]],
+    `GO:0031397` = parent2child_list[["GO:0031397"]],
+    `GO:2000059` = parent2child_list[["GO:2000059"]]
+  ),
+  ubiquitin_independent = list(
+    `GO:0010499` = parent2child_list[["GO:0010499"]]
+  )
+)
+
+#3 Get all GO terms related to ubiquitin and filter for BP
+ubiquitin_terms <- searchGOTerms("ubiquitin")
+ub_godb_bp_df <- ubiquitin_terms %>% 
+  dplyr::filter(go_category == "BP") %>% 
+  dplyr::select(go_id, go_term, go_category) %>% 
+  dplyr::distinct()
+
+# Data.frame that maps go_parent_id to go_parent_term
+go_parent_term_mapping <- ub_godb_bp_df %>% 
+  dplyr::select(go_id, go_term) %>% 
+  dplyr::filter(go_id %in% ub_parent_terms) %>% 
+  dplyr::rename(go_parent_id = go_id,
+                go_parent_term = go_term)
+rownames(go_parent_term_mapping) <- NULL
+
+#4 Make a data.frame with ensembl_id, go_category, category, go_parent_id, go_parent_term, go_id, go_term
+
+# Query the database to find GO terms associated to each gene
+go_ubgenes_result <- queryMany(ub_ensembl_ids,
+                 scopes='ensembl.gene', 
+                 fields=c('ensembl.gene', 'name', 'summary', 'go', 'pfam'), 
+                 species='human', 
+                 return.as='DataFrame')
+
+# Filter result for BP
+go_ubgenes_bp_res <- go_ubgenes_result$go.BP # Filter for BP only
+names(go_ubgenes_bp_res) <- ub_ensembl_ids # Set names
+
+# Convert to data.frame each element of the list
+go_ubgenes_bp_list <- lapply(go_ubgenes_bp_res, 
+                             function(df) 
+                               if (is.null(df)) data.frame(id = character(),
+                                                           gocategory = character(), 
+                                                           term = character()) 
+                               else df %>% 
+                                as.data.frame())
+# Wrangle the data.frame
+go_ubgenes_bp_list <- lapply(go_ubgenes_bp_list,
+                             function(x) 
+                               x %>% 
+                                dplyr::rename(go_id = id,
+                                              go_term = term,
+                                              go_category = gocategory) %>% 
+                                dplyr::select(go_category,
+                                              go_id,
+                                              go_term))
+# Convert list of df to single data.frame
+ub_glist_go_bp_df <- bind_rows(go_ubgenes_bp_list, .id = "ensembl_id") %>%
+  dplyr::distinct()
+
+# Here I lose 28 genes because GO annotation failed. Collect them for exploration.
+empty_dfs <- sapply(go_ubgenes_bp_list, function(x) dim(x)[1] == 0)
+lost_genes <- ub_ensembl_ids[empty_dfs]
+
+# Initialize an empty list to hold the mapping
+go_mapping <- list()
+
+# Iterate through each category in ub_db
+for (category in names(ub_db)) {
+  # Iterate through each parent within a category
+  for (parent_id in names(ub_db[[category]])) {
+    # Iterate through each child within a parent
+    children_ids <- ub_db[[category]][[parent_id]]
+    for (child_id in children_ids) {
+      # Append the category and parent information to the mapping list for each child
+      if (!is.null(go_mapping[[child_id]])) {
+        go_mapping[[child_id]] <- unique(c(go_mapping[[child_id]], paste(parent_id, category, sep = "|")))
+      } else {
+        go_mapping[[child_id]] <- paste(parent_id, category, sep = "|")
+      }
+    }
+  }
+}
+
+# Convert the mapping list to a data.frame for easier manipulation
+go_mapping_df <- stack(go_mapping)
+names(go_mapping_df) <- c("info", "go_id")
+
+# Split info into go_parent_id and category
+go_mapping_df <- go_mapping_df %>%
+  tidyr::separate(info, into = c("go_parent_id", "category"), sep = "\\|")
+
+# Join the mapping information back to the original data.frame
+final_df <- ub_glist_go_bp_df %>%
+  left_join(go_mapping_df, by = "go_id")
+
+# Handle cases where a child belongs to multiple parents
+final_df <- final_df %>%
+  group_by(ensembl_id, go_category, go_id, go_term) %>%
+  summarise(go_parent_id = paste(unique(go_parent_id), collapse = ", "),
+            category = paste(unique(category), collapse = ", "),
+            .groups = 'drop')
+
+# Arrange columns in the desired order
+final_df <- final_df %>%
+  select(ensembl_id, go_category, category, go_parent_id, go_term, go_id)
+
+# Adding go_parent_term
+final_df <- final_df %>%
+  left_join(go_parent_term_mapping, by = "go_parent_id")
+
+# Converting NAs and ordering columns
+annot_ub_glist_df <- final_df %>% 
+  mutate(across(everything(), ~na_if(.x, "NA"))) %>% 
+  dplyr::select(ensembl_id, 
+                go_category, 
+                category, 
+                go_parent_id, 
+                go_parent_term, 
+                go_id, 
+                go_term)
+
+# Identify genes that don't have a parent
+ensembl_ids_all_na_category <- annot_ub_glist_df %>%
+  dplyr::group_by(ensembl_id) %>%
+  dplyr::summarize(all_na_in_category = all(is.na(category)), .groups = 'drop') %>%
+  dplyr::filter(all_na_in_category) %>%
+  dplyr::pull(ensembl_id)
+
+final_df_filtered_all_na <- annot_ub_glist_df %>%
+  filter(ensembl_id %in% ensembl_ids_all_na_category)
+
+# Here I lose 86 genes because no parent was found. Collect them for exploration.
+lost_genes2 <- final_df_filtered_all_na %>% 
+  dplyr::distinct(ensembl_id) %>% 
+  dplyr::pull(ensembl_id)
+
+ensembl_ids_with_non_na_category <- annot_ub_glist_df %>%
+  dplyr::group_by(ensembl_id) %>%
+  dplyr::summarize(any_non_na_in_category = any(!is.na(category)), .groups = 'drop') %>%
+  dplyr::filter(any_non_na_in_category) %>%
+  dplyr::pull(ensembl_id)
+
+final_df_filtered_non_na <- annot_ub_glist_df %>%
+  filter(ensembl_id %in% ensembl_ids_with_non_na_category)
+  
+# 560 genes remaining.
+
+
+
+
+
+# Annotate the parents to ub_glist_go_bp_df
+# Function to find parent GO terms for a given child GO term
+find_parent_GO <- function(child_term, parent_list) {
+  parents <- names(parent_list)[sapply(parent_list, function(children) child_term %in% children)]
+  return(parents)
+}
+
+# Create the new 'go_parent' column
+ub_glist_go_bp_df <- ub_glist_go_bp_df %>%
+  dplyr::rowwise() %>%
+  dplyr::mutate(go_parent = list(find_parent_GO(go_id, go_parent_list))) %>%
+  dplyr::ungroup()
+
+# Create a lookup table from go_id to term
+lookup_table <- ub_glist_go_bp_df %>% 
+  dplyr::select(go_id, term) %>% 
+  dplyr::distinct()
+
+# Check the ones that have +1 GO parent term and reduce to 1
+go_terms_to_keep <- c("GO:0031397", "GO:0031398", "GO:2000059", "GO:2000060")
+
+final_ub_glist_go_bp_df <- ub_glist_go_bp_df %>%
+  mutate(go_parent = map_chr(go_parent, ~ {
+    # Filter go_parent to keep only the terms in go_terms_to_keep
+    kept_terms <- intersect(., go_terms_to_keep)
+    
+    # Sort and compare for specific condition
+    if (identical(sort(.), sort(c("GO:0016579", "GO:0006511")))) {
+      # If this specific match, return "GO:0016579"
+      "GO:0016579"
+    } else if (length(kept_terms) > 0 && length(.) > 1) {
+      # If there are kept terms and the original list length is greater than 1, return them as a character vector
+      paste(kept_terms, collapse = ", ")
+    } else {
+      # If the original list length is not greater than 1, return the original term(s) as a character string
+      paste(., collapse = ", ")
+    }
+  }, .else = NA_character_)) # Provide a fallback for empty or NULL inputs
+
+# Left join to incorporate parent GO terms
+final_ub_glist_go_bp_df <- final_ub_glist_go_bp_df %>% 
+  dplyr::left_join(lookup_table, by = c("go_parent" = "go_id")) %>% 
+  dplyr::rename(go_term = term.x,
+                go_parent_term = term.y)
+
+# Count number of genes from samples in each ubiquitin go parent term
+final_parent_term_count <- final_ub_glist_go_bp_df %>% 
+  dplyr::group_by(go_parent_term) %>% 
+  dplyr::count() %>% 
+  dplyr::arrange(desc(n))
+
+# Display
+datatable(final_parent_term_count, 
+          extensions = c('Buttons', 
+                         'FixedColumns'), 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            fixedColumns = list(leftColumns = 3), # Freeze the first 3 columns
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Count of genes included in each ubiquitin go parent term."
+        )
+
+# ub_glist_go_bp_df %>% 
+#   dplyr::select(ensembl_id) %>% 
+#   dplyr::distinct()
+# # Lost some genes in the way.
+
+# Get all ensembl gene ids for the parent go terms using biomaRt
+# Connect to the Ensembl BioMart database
+ensembl = biomaRt::useMart(biomart="ENSEMBL_MART_ENSEMBL", 
+                  host="https://grch37.ensembl.org", 
+                  path="/biomart/martservice",
+                  dataset="hsapiens_gene_ensembl")
+
+# Retrieve Hugo symbols & Ensembl gene ids
+go2ensembl_result <- biomaRt::getBM(attributes = c("go_id", 
+                                                "ensembl_gene_id"),
+                   filters = "go",
+                   values = ub_parent_terms,
+                   mart = ensembl)
+
+# # Query the databse
+# go2ensembl_result <- queryMany(ub_parent_terms,
+#                  scopes='go', 
+#                  fields=c('ensembl.gene'), 
+#                  species='human', 
+#                  return.as='DataFrame')
+# 
+# df_offspring <- go_offspring_result@listData[["go.BP"]][[1]]
+# df_offspring <- rbind(df_offspring, go_offspring_result@listData[["go.BP"]][[2]])
+# df_offspring <- rbind(df_offspring, go_offspring_result@listData[["go.BP"]][[3]])
+# 
+# df_offspring_filtered <- df_offspring %>% 
+#   dplyr::rename(go_id = id) %>% 
+#   dplyr::select(go_id, term) %>% 
+#   dplyr::distinct()
+```
+
+There are `r length(ub_ensembl_ids)` mutated ubiquitin-related genes in total.
+
+There are `r nrow(ub_godb_bp_df)` GO BP terms related to ubiquitin in total (from GO.db). Filter using grep("ubiquitin").
+
+This is my selected GO terms related to ubiquitin to build the Gene Sets DB: `r ub_parent_terms`.
+
+The resulting data.frame with annotated go_terms has more rows than the initial ubiquitin gene list because a single gene can be part of multiple GO terms (BP).
+
+When I annotate the genes with GO terms, I lose some genes: `r nrow(raw_ub_glist_go_bp_df %>% dplyr::select(ensembl_id) %>% distinct())` vs `r length(ub_ensembl_ids)` (lost `r length(lost_genes)` genes). This is because no GO term was associated to these genes.
+
+Then, when I annotate genes with parent GO terms, I lose more: `r length(lost_genes2)`. Iterate to find more parents?
+
 # Create a binary matrix (LoF - Ubiquitin)
+
+This binary matrix has ubiquitin mutated genes as rows and patients as columns. There is a 1 if a particular gene was mutated at least once for a specific sample, and zero otherwise.
 
 ```{r, message=FALSE, warning=FALSE}
 # Create a dataframe for the matrix, initialize with ensembl_id and hugo_symbol, fill 0 for samples
-lof_ub_binary <- data.frame(ensembl_id = ub_genes_unique, hugo_symbol = rep(NA, length(ub_genes_unique)))
+lof_ub_binary <- data.frame(ensembl_id = ub_ensembl_ids, hugo_symbol = rep(NA, length(ub_ensembl_ids)))
 
 # For each sample_id, add a column to lof_ub_binary and initialize with 0
 for (sample_id in unique(lof_df_ubiquitin$sample_id)) {
@@ -312,7 +638,27 @@ lof_ub_binary_out_path <- file.path(results_ubgenesets_path,
                       "lof_ub_binary.csv")
 write.csv(lof_ub_binary, file = lof_ub_binary_out_path, row.names = TRUE)
 
-##### TO DO: Annotate mutated genes with Aimilia's code
+# Display
+datatable(lof_ub_binary, 
+          extensions = c('Buttons', 
+                         'FixedColumns'), 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            fixedColumns = list(leftColumns = 3), # Freeze the first 3 columns
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Binary matrix of ubiquitin LoF mutations per sample."
+        )
 ```
 
 # Session Info

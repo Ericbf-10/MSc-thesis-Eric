@@ -446,6 +446,171 @@ combined_data <- dplyr::left_join(combined_data, p_values, by = "pathway")
 combined_data
 ```
 
+# Legacy ubiquitin GO terms DB
+
+This is the code I used to find the first iteration of parent terms to build the DB.
+
+## Build a DB of GO terms for ubiquitin-related Bio Processes (based on gene list)
+
+#### Define which parent terms I want to use.
+#### Get offspring for all parent terms, and filter for those parents that I selected.
+#### Iterate through the ubiquitin terms from my gene list and annotate the parent terms.
+#### Check the ones that have +1 GO parent term and reduce to 1.
+#### Get Ensembl IDs related to those GO terms. 
+
+```{r, message=FALSE, warning=FALSE}
+# Query the databse
+go_ubgenes_result <- queryMany(ub_ensembl_ids,
+                 scopes='ensembl.gene', 
+                 fields=c('ensembl.gene', 'name', 'summary', 'go', 'pfam'), 
+                 species='human', 
+                 return.as='DataFrame')
+
+# Filter result for BP
+go_ubgenes_bp_res <- go_ubgenes_result$go.BP # Filter for BP only
+names(go_ubgenes_bp_res) <- ub_ensembl_ids # Set names
+
+# Convert to data.frame each element of the list
+go_ubgenes_bp_list <- lapply(go_ubgenes_bp_res, 
+                             function(df) 
+                               if (is.null(df)) data.frame(id = character(),
+                                                           gocategory = character(), 
+                                                           term = character()) 
+                               else df %>% 
+                                as.data.frame())
+# Wrangle the data.frame
+go_ubgenes_bp_list <- lapply(go_ubgenes_bp_list,
+                             function(x) 
+                               x %>% 
+                                dplyr::rename(go_id = id) %>% 
+                                dplyr::select(go_id,
+                                              gocategory,
+                                              term))
+# Convert list of df to single data.frame
+raw_ub_glist_go_bp_df <- bind_rows(go_ubgenes_bp_list, .id = "ensembl_id") %>%
+  mutate(ensembl_id = stringr::str_replace(ensembl_id, "\\..*$", ""),
+         ensembl_id = factor(ensembl_id, levels = ub_ensembl_ids))
+
+# Set rownames to NULL
+rownames(raw_ub_glist_go_bp_df) <- NULL
+
+# Filter for unique ubiquitin GO terms
+ub_glist_go_bp_df <- raw_ub_glist_go_bp_df %>% 
+  dplyr::filter(str_detect(term, "ubiquitin")) %>%
+  dplyr::distinct() %>% 
+  dplyr::arrange(go_id)
+
+# Get selected GO terms as parents and their offspring
+ub_go_parent_terms <- c("GO:0016567", "GO:0016579", "GO:0006511", "GO:0010499", "GO:0010992", "GO:0051438", "GO:0070086", "GO:0120323", "GO:0031397", "GO:0031398", "GO:2000059", "GO:2000060")
+all_offspring <- as.list(GOBPOFFSPRING) # Get the offspring terms
+go_parent_list <- map(ub_go_parent_terms, function(x) {
+  offspring <- all_offspring[[x]]
+  # If offspring has elements, return it (with parent itself)
+  if (length(offspring) > 1) {
+    return(c(x, offspring))
+  # If the offspring is not NA, return it (with parent itself)
+  } else if (!is.na(offspring)) {
+    return(c(x, offspring))
+  # If the offspring is NA, return the GO term itself wrapped in a list
+  } else {
+    return(x)
+  }
+})
+names(go_parent_list) <- ub_go_parent_terms
+
+# Annotate the parents to ub_glist_go_bp_df
+# Function to find parent GO terms for a given child GO term
+find_parent_GO <- function(child_term, parent_list) {
+  parents <- names(parent_list)[sapply(parent_list, function(children) child_term %in% children)]
+  return(parents)
+}
+
+# Create the new 'go_parent' column
+ub_glist_go_bp_df <- ub_glist_go_bp_df %>%
+  dplyr::rowwise() %>%
+  dplyr::mutate(go_parent = list(find_parent_GO(go_id, go_parent_list))) %>%
+  dplyr::ungroup()
+
+# Create a lookup table from go_id to term
+lookup_table <- ub_glist_go_bp_df %>% 
+  dplyr::select(go_id, term) %>% 
+  dplyr::distinct()
+
+# Check the ones that have +1 GO parent term and reduce to 1
+go_terms_to_keep <- c("GO:0031397", "GO:0031398", "GO:2000059", "GO:2000060")
+
+final_ub_glist_go_bp_df <- ub_glist_go_bp_df %>%
+  mutate(go_parent = map_chr(go_parent, ~ {
+    # Filter go_parent to keep only the terms in go_terms_to_keep
+    kept_terms <- intersect(., go_terms_to_keep)
+    
+    # Sort and compare for specific condition
+    if (identical(sort(.), sort(c("GO:0016579", "GO:0006511")))) {
+      # If this specific match, return "GO:0016579"
+      "GO:0016579"
+    } else if (length(kept_terms) > 0 && length(.) > 1) {
+      # If there are kept terms and the original list length is greater than 1, return them as a character vector
+      paste(kept_terms, collapse = ", ")
+    } else {
+      # If the original list length is not greater than 1, return the original term(s) as a character string
+      paste(., collapse = ", ")
+    }
+  }, .else = NA_character_)) # Provide a fallback for empty or NULL inputs
+
+# Left join to incorporate parent GO terms
+final_ub_glist_go_bp_df <- final_ub_glist_go_bp_df %>% 
+  dplyr::left_join(lookup_table, by = c("go_parent" = "go_id")) %>% 
+  dplyr::rename(go_term = term.x,
+                go_parent_term = term.y)
+
+# Count number of genes from samples in each ubiquitin go parent term
+final_parent_term_count <- final_ub_glist_go_bp_df %>% 
+  dplyr::group_by(go_parent_term) %>% 
+  dplyr::count() %>% 
+  dplyr::arrange(desc(n))
+
+# Display
+datatable(final_parent_term_count, 
+          extensions = c('Buttons', 
+                         'FixedColumns'), 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            fixedColumns = list(leftColumns = 3), # Freeze the first 3 columns
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Count of genes included in each ubiquitin go parent term."
+        )
+
+# ub_glist_go_bp_df %>% 
+#   dplyr::select(ensembl_id) %>% 
+#   dplyr::distinct()
+# # Lost some genes in the way.
+
+# Get all ensembl gene ids for the parent go terms using biomaRt
+# Connect to the Ensembl BioMart database
+ensembl = biomaRt::useMart(biomart="ENSEMBL_MART_ENSEMBL", 
+                  host="https://grch37.ensembl.org", 
+                  path="/biomart/martservice",
+                  dataset="hsapiens_gene_ensembl")
+
+# Retrieve Hugo symbols & Ensembl gene ids
+go2ensembl_result <- biomaRt::getBM(attributes = c("go_id", 
+                                                "ensembl_gene_id"),
+                   filters = "go",
+                   values = ub_go_parent_terms,
+                   mart = ensembl)
+```
+
 ## Session Info
 
 ```{r}

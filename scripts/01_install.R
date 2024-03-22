@@ -60,10 +60,6 @@ if (!("EnsDb.Hsapiens.v75" %in% installed.packages())) {
   # Install this package if it isn't installed yet
   BiocManager::install("EnsDb.Hsapiens.v75", update = FALSE) # From Ensembl
 }
-if (!("org.Hs.eg.db" %in% installed.packages())) { #### REMOVE??
-  # Install this package if it isn't installed yet
-  BiocManager::install("org.Hs.eg.db", update = FALSE) # From NCBI Entrez Gene data and other sources
-}
 if (!("fgsea" %in% installed.packages())) {
   # Install this package if it isn't installed yet
   BiocManager::install("fgsea", update = FALSE)
@@ -79,4 +75,16 @@ if (!("clusterProfiler" %in% installed.packages())) {
 if (!("ggupset" %in% installed.packages())) {
   # Install this package if it isn't installed yet
   BiocManager::install("ggupset", update = FALSE)
+}
+if (!("mygene" %in% installed.packages())) {
+  # Install this package if it isn't installed yet
+  BiocManager::install("mygene", update = FALSE)
+}
+if (!("GO.db" %in% installed.packages())) {
+  # Install this package if it isn't installed yet
+  BiocManager::install("GO.db", update = FALSE)
+}
+if (!("AnnotationDbi" %in% installed.packages())) {
+  # Install this package if it isn't installed yet
+  BiocManager::install("AnnotationDbi", update = FALSE)
 }
