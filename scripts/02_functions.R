@@ -617,35 +617,32 @@ boxplot_genesets <- function(geneset, response_df, mut_df, plot_path, fig_title,
 # Heat Map of combined GS across samples
 heat_map_genesets <- function(response_df, mut_df, plot_path, fig_title) {
   
+  # Assuming response_df has 'sample_id' and 'patient_response' where patient_response are "R" or "NR"
+  
+  # Ensure that patient_response is a factor with levels in the correct order for sorting
+  response_df$patient_response <- factor(response_df$patient_response, levels = c("R", "NR"))
+  
   # Prepare data for all samples
   prepared_data_df <- mut_df %>%
-    dplyr::group_by(sample_id) %>%
-    dplyr::mutate(Gene_ratio = overlap / size,
-                  Count = overlap) %>%
-    dplyr::arrange(sample_id, desc(Count)) %>%
-    dplyr::ungroup() %>% 
-    dplyr::select(sample_id, pathway, Count)
+    dplyr::mutate(Gene_ratio = overlap / size, Count = overlap) %>% 
+    dplyr::select(sample_id, pathway, Count) %>%
+    dplyr::left_join(response_df, by = "sample_id") %>%
+    dplyr::mutate(sample_response = paste(sample_id, patient_response, sep = " - ")) %>%
+    # Create an ordering column based on patient_response to sort "R" first then "NR"
+    dplyr::mutate(ordering = as.numeric(patient_response))
   
-  # Merge response info
-  combined_data <- prepared_data_df %>%
-    dplyr::left_join(response_df, by = "sample_id")
-  
-  # Step 2: Plot with ordered sample_id and facets to distinguish "R" and "NR"
-  heat_map_plot <- ggplot(combined_data, aes(x = pathway, 
-                                             y = sample_id, 
-                                             fill = Count)) +
-    geom_tile(color = "black", linewidth = 0.2) +
-    scale_fill_gradient(low = "yellow", high = "red") + # Customize gradient colors as needed
-    theme_minimal() +
-    labs(fill = "Count", x = "Pathway", y = "Sample ID") +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1)) + # Improve axis label readability
-    labs(title = fig_title,
-         x = "Gene Set",
-         y = "Sample ID",
-         fill = "Count")
+  # Plot with ordered sample_response
+  heat_map_plot <- ggplot2::ggplot(prepared_data_df, ggplot2::aes(x = pathway, 
+                                                                  y = reorder(sample_response, ordering), 
+                                                                  fill = Count)) +
+    ggplot2::geom_tile(color = "black", linewidth = 0.2) +
+    ggplot2::scale_fill_gradient(low = "green", high = "red") +
+    ggplot2::theme_minimal() +
+    ggplot2::labs(title = fig_title, x = "Gene Set", y = "Sample ID", fill = "Count") +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
   
   # Save plot
-  ggsave(plot_path, heat_map_plot, width = 15, height = 10, dpi = 300)
+  ggplot2::ggsave(plot_path, heat_map_plot, width = 15, height = 10, dpi = 300)
   
   # Return
   return(heat_map_plot)
