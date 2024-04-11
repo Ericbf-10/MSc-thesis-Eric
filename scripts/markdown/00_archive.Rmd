@@ -609,6 +609,99 @@ go2ensembl_result <- biomaRt::getBM(attributes = c("go_id",
                    filters = "go",
                    values = ub_go_parent_terms,
                    mart = ensembl)
+
+###############################################################################
+
+# ### Alternative: use BiomaRt with grch37
+# # Get all GO terms for the ub genes using biomaRt
+# # Connect to the GO BioMart database
+# ensembl = biomaRt::useMart(biomart="ENSEMBL_MART_ENSEMBL", 
+#                   host="https://grch37.ensembl.org", 
+#                   path="/biomart/martservice",
+#                   dataset="hsapiens_gene_ensembl")
+# 
+# # Retrieve GO & Ensembl gene ids
+# ensembl2go_biomart_res <- biomaRt::getBM(attributes = c("namespace_1003",
+#                                                         "name_1006",
+#                                                         "go_id", 
+#                                                         "ensembl_gene_id"),
+#                    filters = "ensembl_gene_id",
+#                    values = ub_ensembl_ids,
+#                    mart = ensembl)
+# 
+# # Filter for biological_process
+# ensembl2go_bp_res <- ensembl2go_biomart_res %>% 
+#   dplyr::rename(go_category = namespace_1003,
+#                 go_term = name_1006,
+#                 ensembl_id = ensembl_gene_id) %>% 
+#   dplyr::filter(go_category == "biological_process") %>% 
+#   dplyr::distinct()
+# 
+# # ensembl2go_bp_res %>% 
+# #   dplyr::select(ensembl_gene_id) %>% 
+# #   dplyr::distinct()
+# 
+# # Here I lose 120 genes because GO annotation failed. Collect them for exploration.
+# lost_genes3 <- setdiff(ub_ensembl_ids, ensembl2go_bp_res$ensembl_id)
+# 
+# # Join the mapping information back to the original data.frame
+# final_df2 <- ensembl2go_bp_res %>%
+#   left_join(go_mapping_df, by = "go_id")
+# 
+# # Handle cases where a child belongs to multiple parents
+# final_df2 <- final_df2 %>%
+#   group_by(ensembl_id, go_category, go_id, go_term) %>%
+#   summarise(go_parent_id = paste(unique(go_parent_id), collapse = ", "),
+#             category = paste(unique(category), collapse = ", "),
+#             .groups = 'drop')
+# 
+# # Arrange columns in the desired order
+# final_df2 <- final_df2 %>%
+#   dplyr::select(ensembl_id, go_category, category, go_parent_id, go_term, go_id)
+# 
+# # Adding go_parent_term
+# final_df2 <- final_df2 %>%
+#   left_join(go_parent_term_mapping, by = "go_parent_id")
+# 
+# # Converting NAs and ordering columns
+# annot_ub_glist_df2 <- final_df2 %>% 
+#   mutate(across(everything(), ~na_if(.x, "NA"))) %>% 
+#   dplyr::select(ensembl_id, 
+#                 go_category, 
+#                 category, 
+#                 go_parent_id, 
+#                 go_parent_term, 
+#                 go_id, 
+#                 go_term)
+# 
+# # Identify genes that don't have a parent
+# ensembl_ids_all_na_category2 <- annot_ub_glist_df2 %>%
+#   dplyr::group_by(ensembl_id) %>%
+#   dplyr::summarize(all_na_in_category = all(is.na(category)), .groups = 'drop') %>%
+#   dplyr::filter(all_na_in_category) %>%
+#   dplyr::pull(ensembl_id)
+# 
+# final_df_filtered_all_na2 <- annot_ub_glist_df2 %>%
+#   filter(ensembl_id %in% ensembl_ids_all_na_category2)
+# 
+# # Here I lose 154 genes because no parent was found. Collect them for exploration.
+# lost_genes4 <- final_df_filtered_all_na2 %>% 
+#   dplyr::distinct(ensembl_id) %>% 
+#   dplyr::pull(ensembl_id)
+# 
+# ensembl_ids_with_non_na_category2 <- annot_ub_glist_df2 %>%
+#   dplyr::group_by(ensembl_id) %>%
+#   dplyr::summarize(any_non_na_in_category = any(!is.na(category)), .groups = 'drop') %>%
+#   dplyr::filter(any_non_na_in_category) %>%
+#   dplyr::pull(ensembl_id)
+# 
+# final_df_filtered_non_na2 <- annot_ub_glist_df2 %>%
+#   filter(ensembl_id %in% ensembl_ids_with_non_na_category2)
+
+# 400/674 genes remaining. 274 genes lost in total. Here I used GRCh37
+
+###############################################################################
+
 ```
 
 ## Session Info

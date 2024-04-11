@@ -149,7 +149,7 @@ mm909_sum_plot_path <- file.path(figures_ubgsea_path,
                               "mm909_sum_plot.png")
 
 # Summary plot
-mm909_sum_plot <- sum_plot(all_df_ubiquitin, nonsyn_df_ubiquitin, lof_df_ubiquitin, mm909_sum_plot_path)
+mm909_sum_plot <- sum_plot(response_df, all_df_ubiquitin, nonsyn_df_ubiquitin, lof_df_ubiquitin, mm909_sum_plot_path)
 
 # Display
 print(mm909_sum_plot)

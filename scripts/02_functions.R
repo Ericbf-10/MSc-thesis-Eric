@@ -632,13 +632,13 @@ heat_map_genesets <- function(response_df, mut_df, plot_path, fig_title) {
     dplyr::mutate(ordering = as.numeric(patient_response))
   
   # Plot with ordered sample_response
-  heat_map_plot <- ggplot2::ggplot(prepared_data_df, ggplot2::aes(x = pathway, 
-                                                                  y = reorder(sample_response, ordering), 
+  heat_map_plot <- ggplot2::ggplot(prepared_data_df, ggplot2::aes(x = reorder(sample_response, ordering), 
+                                                                  y = pathway, 
                                                                   fill = Count)) +
     ggplot2::geom_tile(color = "black", linewidth = 0.2) +
     ggplot2::scale_fill_gradient(low = "green", high = "red") +
     ggplot2::theme_minimal() +
-    ggplot2::labs(title = fig_title, x = "Gene Set", y = "Sample ID", fill = "Count") +
+    ggplot2::labs(title = fig_title, y = "Gene Set", x = "Sample ID", fill = "Count") +
     ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
   
   # Save plot

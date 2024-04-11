@@ -40,6 +40,9 @@ if (!require("HGNChelper")) {
 if (!requireNamespace("BiocManager", quietly = TRUE)) {
   install.packages("BiocManager")
 }
+if (!requireNamespace("ComplexUpset", quietly = TRUE)) {
+  install.packages("ComplexUpset")
+}
 if (!("VariantAnnotation" %in% installed.packages())) {
   # Install this package if it isn't installed yet
   BiocManager::install("VariantAnnotation", update = FALSE)
@@ -58,7 +61,7 @@ if (!("GSEABase" %in% installed.packages())) {
 }
 if (!("EnsDb.Hsapiens.v75" %in% installed.packages())) {
   # Install this package if it isn't installed yet
-  BiocManager::install("EnsDb.Hsapiens.v75", update = FALSE) # From Ensembl
+  BiocManager::install("EnsDb.Hsapiens.v75", update = FALSE) # GRCh37 from Ensembl
 }
 if (!("fgsea" %in% installed.packages())) {
   # Install this package if it isn't installed yet
