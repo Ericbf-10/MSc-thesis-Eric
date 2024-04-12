@@ -40,8 +40,8 @@ if (!require("HGNChelper")) {
 if (!requireNamespace("BiocManager", quietly = TRUE)) {
   install.packages("BiocManager")
 }
-if (!requireNamespace("ComplexUpset", quietly = TRUE)) {
-  install.packages("ComplexUpset")
+if (!requireNamespace("VennDiagram", quietly = TRUE)) {
+  install.packages("VennDiagram")
 }
 if (!("VariantAnnotation" %in% installed.packages())) {
   # Install this package if it isn't installed yet

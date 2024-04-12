@@ -583,6 +583,9 @@ manual_annot_df <- manual_annot_df %>%
 raw_ub_glist_go_bp_df <- bind_rows(raw_ub_glist_go_bp_df, manual_annot_df) %>% 
   dplyr::distinct()
 
+```
+
+```{r, warning=FALSE, message=FALSE}
 #4 Define categories and parents
 
 # Categories (as character)
@@ -590,7 +593,7 @@ ub_categories <- c("ubiquitination", "deubiquitination", "ubiquitin_neutral", "u
 # ub_categories <- setNames(as.list(ub_categories), ub_categories)
 
 # Parents (as character)
-ub_parent_terms <- c("GO:0016567", "GO:0016579", "GO:0006511", "GO:0010499", "GO:0010992", "GO:0070086", "GO:0120323", "GO:0031397", "GO:0031398", "GO:2000059", "GO:2000060", "GO:0046872", "GO:0004842")
+ub_parent_terms <- c("GO:0016567", "GO:0016579", "GO:0006511", "GO:0010499", "GO:0010992", "GO:0070086", "GO:0120323", "GO:0031397", "GO:0031398", "GO:2000059", "GO:2000060", "GO:0046872", "GO:0004842", "GO:0051865", "GO:0000209", "GO:0006513")
 # "GO:0051438" --> removed because regulation can be positive or negative
 # ub_parent_terms <- setNames(as.list(ub_parent_terms), ub_parent_terms)
 
@@ -632,7 +635,10 @@ ub_db <- list(
     `GO:0070086` = parent2child_list[["GO:0070086"]],
     `GO:0120323` = parent2child_list[["GO:0120323"]],
     `GO:0031398` = parent2child_list[["GO:0031398"]],
-    `GO:2000060` = parent2child_list[["GO:2000060"]]
+    `GO:2000060` = parent2child_list[["GO:2000060"]],
+    `GO:0051865` = parent2child_list[["GO:0051865"]],
+    `GO:0000209` = parent2child_list[["GO:0000209"]],
+    `GO:0006513` = parent2child_list[["GO:0006513"]]
   ),
   deubiquitination = list(
     `GO:0016579` = parent2child_list[["GO:0016579"]],
@@ -726,8 +732,14 @@ annot_ub_glist_df <- annot_ub_glist_df %>%
                                                ifelse(grepl(",", go_parent_id) & grepl("GO:2000060", go_parent_id),
                                                      "GO:2000060",
                                                      ifelse(grepl(",", go_parent_id) & grepl("GO:0031398", go_parent_id),
-                                               "GO:0031398",
-                                                     go_parent_id))))))
+                                                     "GO:0031398",
+                                                     ifelse(grepl(",", go_parent_id) & grepl("GO:0051865", go_parent_id),
+                                                           "GO:0051865",
+                                                           ifelse(grepl(",", go_parent_id) & grepl("GO:0000209", go_parent_id),
+                                                                 "GO:0000209",
+                                                                 ifelse(grepl(",", go_parent_id) & grepl("GO:0006513", go_parent_id),
+                                                                 "GO:0006513",
+                                                                 go_parent_id)))))))))
   )
 
 # DEBUG: check category
@@ -1075,7 +1087,9 @@ annot_ub_glist_df3 <- annot_ub_glist_df3 %>%
                           "GO:0016579",
                           ifelse(grepl(",", go_parent_id) & grepl("GO:0006508", go_parent_id),
                                  "GO:0006508",
-                                  go_parent_id))
+                                 ifelse(grepl(",", go_parent_id) & grepl("GO:0030154", go_parent_id),
+                                        "GO:0030154",
+                                        go_parent_id)))
   )
 
 # DEBUG: check category
@@ -1144,6 +1158,8 @@ Later I handled those cases that had multiple categories (i.e. ubiquitination an
 When I annotate genes with parent GO terms, I lose `r length(lost_genes4)` genes because no GO parent was found. I checked some of them and they don't seem to have relationship with ubiquitin processes. They are involved in other important processes such as DNA repair, apoptotic regulation, etc.
 
 So I defined some more parent terms for them and repeated the process. So far I’ve added 5 more GO parent terms. With that, I achieved that I’m only missing `r length(lost_genes5)` genes from the original list which still don’t have a parent GO term. So a total of `r length(lost_genes4) - length(lost_genes5)` genes were rescued. 
+
+I added 3 more GO parent terms to split the "protein ubiquitination" as it had 465 genes associated with it.
 
 ## Resulting tables and FORA for parents
 
