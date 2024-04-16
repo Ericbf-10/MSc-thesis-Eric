@@ -341,9 +341,7 @@ There are 729 ubiquitin-related genes in the file. The category E3_genes (Ubiqui
 A brief description of the ubiquitin protein families described here:
 The ubiquitinylation process is now known to be performed by several enzymes in sequence, starting with EC 6.2.1.45 (ubiquitin-activating enzyme E1) and followed by several transfer reactions, including those of EC 2.3.2.23 (E2 ubiquitin-conjugating enzyme) and EC 2.3.2.27 (RING-type E3 ubiquitin transferase) [Ref](https://www.brenda-enzymes.org/enzyme.php?ecno=6.3.2.19).
 
-Ubiquitin carboxyl-terminal hydrolases (UCH) (EC 3.4.19.12) are thiol proteases that recognise and hydrolyse the peptide bond at the C-terminal glycine of ubiquitin. These enzymes are involved in the processing of poly-ubiquitin precursors as well as that of ubiquinated proteins. The deubiquitinsing proteases can be split into 2 size ranges, 20-30kDa (IPR001578) and 100-200kDa: the second class consist of large proteins (800 to 2000 residues) that belong to the peptidase family C19, and this group is currently represented by yeast UBP1 [Ref](https://www.ebi.ac.uk/interpro/entry/InterPro/IPR001394/).
-
-Deubiquitinases are proteases that cleave ubiquitin from proteins (EC 3.4.19.12) [Ref](https://meshb.nlm.nih.gov/record/ui?ui=D000072017).
+Ubiquitin carboxyl-terminal hydrolases (UCH) or Deubiquitinases (DUBs) (EC 3.4.19.12) are thiol proteases that recognise and hydrolyse the peptide bond at the C-terminal glycine of ubiquitin. These enzymes are involved in the processing of poly-ubiquitin precursors as well as that of ubiquinated proteins. The deubiquitinsing proteases can be split into 2 size ranges, 20-30kDa (IPR001578) and 100-200kDa: the second class consist of large proteins (800 to 2000 residues) that belong to the peptidase family C19, and this group is currently represented by yeast UBP1 [Ref](https://www.ebi.ac.uk/interpro/entry/InterPro/IPR001394/).
 
 **In summary, E1, E2 and E3 are enzymes involved in "protein ubiquitination", whereas C19 and dub are enzymes involved in "protein deubiquitination".**
 
@@ -383,7 +381,7 @@ datatable(r_lof_ub_df,
             buttons = c('copy', 'excel', 'csv'),
             scrollX=TRUE,
             pageLength=10,
-            fixedColumns = list(leftColumns = 1), # Freeze the first column
+            fixedColumns = list(leftColumns = 2), # Freeze the first 2 columns
             columnDefs = list(list(
               targets = "_all",
               render = JS(
@@ -404,7 +402,7 @@ datatable(nr_lof_ub_df,
             buttons = c('copy', 'excel', 'csv'),
             scrollX=TRUE,
             pageLength=10,
-            fixedColumns = list(leftColumns = 1), # Freeze the first column
+            fixedColumns = list(leftColumns = 2), # Freeze the first 2 columns
             columnDefs = list(list(
               targets = "_all",
               render = JS(
@@ -429,6 +427,12 @@ glob_category_gene_count <- annot_lof_df_ubiquitin %>%
   dplyr::arrange(desc(row_count)) %>% 
   dplyr::ungroup() %>% 
   dplyr::rename(mutation_count = row_count)
+
+# Get unique ensembl ids
+glob_unique_ensembl_ids <- annot_lof_df_ubiquitin %>% 
+  dplyr::select(ensembl_id) %>% 
+  dplyr::distinct() %>% 
+  dplyr::pull(ensembl_id)
 
 # Add total count row
 total_count <- sum(glob_category_gene_count$mutation_count)
@@ -458,6 +462,8 @@ datatable(glob_category_gene_count,
         )
 ```
 
+So, we have `r total_count` mutations in `r length(glob_unique_ensembl_ids)` genes.
+
 ## Responders
 
 ```{r, warning=FALSE, message=FALSE}
@@ -468,6 +474,12 @@ r_category_gene_count <- r_lof_ub_df %>%
   dplyr::arrange(desc(row_count)) %>% 
   dplyr::ungroup() %>% 
   dplyr::rename(mutation_count = row_count)
+
+# Get unique ensembl ids
+r_unique_ensembl_ids <- r_lof_ub_df %>% 
+  dplyr::select(ensembl_id) %>% 
+  dplyr::distinct() %>% 
+  dplyr::pull(ensembl_id)
 
 # Add total count row
 total_count <- sum(r_category_gene_count$mutation_count)
@@ -497,6 +509,8 @@ datatable(r_category_gene_count,
         )
 ```
 
+So, we have `r total_count` mutations in `r length(r_unique_ensembl_ids)` genes.
+
 ## Non-responders
 
 ```{r, warning=FALSE, message=FALSE}
@@ -507,6 +521,12 @@ nr_category_gene_count <- nr_lof_ub_df %>%
   dplyr::arrange(desc(row_count)) %>% 
   dplyr::ungroup() %>% 
   dplyr::rename(mutation_count = row_count)
+
+# Get unique ensembl ids
+nr_unique_ensembl_ids <- nr_lof_ub_df %>% 
+  dplyr::select(ensembl_id) %>% 
+  dplyr::distinct() %>% 
+  dplyr::pull(ensembl_id)
 
 # Add total count row
 total_count <- sum(nr_category_gene_count$mutation_count)
@@ -535,6 +555,8 @@ datatable(nr_category_gene_count,
           caption = "Count of mutations in genes included in each ubiquitin category for Non-responders."
         )
 ```
+
+So, we have `r total_count` mutations in `r length(nr_unique_ensembl_ids)` genes.
 
 From these results, I can see that Responders have roughly the same amount of LoF mutations in ubiquitination and deubiquitination enzymes (76 and 73 respectively). On the other hand, Non-responders have a larger proportion of mutations in ubiquitination enzymes (38 and 17 respectively). These results are not aligned with our hypothesis, but I need to explore more.
 
@@ -802,6 +824,12 @@ I don't see a clear pattern with the bubble plots. It seems that sample MM909_03
 
 <!-- print(mm909_ubiquitin_lof_plot_share) -->
 <!-- ``` -->
+
+## LoF mutations in unique Ubiquitin genes in R and NR -> annotation with Ub_db
+
+```{r, warning=FALSE, message=FALSE}
+fora_results_ubiquitin_lof_df
+```
 
 # Session Info
 

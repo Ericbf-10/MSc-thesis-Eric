@@ -435,6 +435,78 @@ plot_top5 <- function(response_df, mut_df, plot_path, fig_title, fig_y_label) {
   return(top5_plot)
 }
 
+# Bubble Plot all Gene Sets across samples stratified by response
+bubble_plot_all <- function(response_df, mut_df, plot_path, fig_title, fig_y_label) {
+  
+  # Prepare data for all samples in the df: calculate Gene ratio per sample, do not filter by p.adjust and keep all GS
+  prepared_data_df <- mut_df %>%
+    dplyr::group_by(sample_id) %>%
+    dplyr::mutate(Gene_ratio = overlap / size,
+                  Count = overlap) %>%
+    dplyr::arrange(sample_id, desc(Count)) %>%
+    dplyr::ungroup() %>% 
+    dplyr::filter(Count > 0)  # Exclude rows where Count is 0
+  
+  # Merge response info
+  combined_data <- prepared_data_df %>%
+    dplyr::left_join(response_df, by = "sample_id")
+  
+  # Step 1: Create an ordered factor for sample_id based on patient_response
+  response_order <- combined_data %>%
+    dplyr::select(sample_id, patient_response) %>%
+    dplyr::distinct() %>%
+    dplyr::arrange(patient_response, sample_id) # Arrange so that "R" comes before "NR"
+  
+  combined_data$sample_id <- factor(combined_data$sample_id,
+                                    levels = response_order$sample_id)
+  
+  # Calculate dynamic breaks and labels for Count
+  count_breaks <- quantile(combined_data$Count, probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
+  count_breaks <- round(count_breaks)
+  count_breaks <- count_breaks[count_breaks > 0]
+  count_breaks <- unique(count_breaks)
+  
+  count_labels <- vector("character", length(count_breaks))
+  for (i in seq_along(count_breaks)) {
+    count_labels[i] <- as.character(count_breaks[i])
+  }
+  
+  # Step 2: Plot with ordered sample_id and facets to distinguish "R" and "NR"
+  bubble_plot <- ggplot(combined_data, aes(x = sample_id,
+                                           y = reorder(pathway, Count),
+                                           size = Count,
+                                           color = patient_response)) +
+    geom_point() +
+    scale_color_manual(values = c("R" = "blue", "NR" = "red"), 
+                       name = "Response",
+                       labels = c("R" = "Responders", "NR" = "Non-responders")) +
+    scale_size_continuous(name = "Count",
+                          range = c(1, 6),
+                          breaks = count_breaks,
+                          labels = count_labels) +
+    facet_grid(. ~ patient_response, scales = "free_x", space = "free_x") +
+    theme_minimal() +
+    theme(
+      panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+      panel.grid.minor = element_blank(),
+      panel.background = element_rect(fill = "white", colour = "black"),
+      plot.background = element_rect(fill = "white", colour = NA),
+      legend.position = "right",
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    ) +
+    labs(title = fig_title,
+         x = "Sample ID",
+         y = fig_y_label,
+         color = "Response",
+         size = "Count")
+  
+  # Save plot
+  ggsave(plot_path, bubble_plot, width = 15, height = 20, dpi = 300)
+  
+  # Return
+  return(bubble_plot)
+}
+
 # Bubble Plot for (a) specific Gene Set(s) across samples stratified by response
 plot_geneset <- function(geneset, response_df, mut_df, plot_path, fig_title, fig_y_label) {
   # geneset is a vector i.e. c("GS1", "GS2")
