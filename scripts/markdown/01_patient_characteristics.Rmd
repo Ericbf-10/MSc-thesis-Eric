@@ -23,6 +23,9 @@ library(tidyverse)
 library(dplyr)
 library(knitr)
 library(DT)
+library(ggplot2)
+library(patchwork)
+library(ggpubr)
 
 ### Load functions
 source(file = "../02_functions.R")
@@ -37,6 +40,14 @@ results_pc_path <- file.path(current_dir,
 # Create the folder if it does not exist
 if(!file.exists(results_pc_path)) {
   dir.create(results_pc_path, recursive = TRUE)
+}
+
+figures_pc_path <- file.path(current_dir,
+                              "../../results/patient_characteristics/figures")
+
+# Create the folder if it does not exist
+if(!file.exists(figures_pc_path)) {
+  dir.create(figures_pc_path, recursive = TRUE)
 }
 
 # Sup1
@@ -304,6 +315,65 @@ datatable(results_df,
         )
 ```
   
+## Characteristics plot
+
+```{r, message=FALSE, warning=FALSE, fig.width=8, fig.height=6}
+pat_df <- sup1_final %>%
+  dplyr::rename(patient_response = Patient.Response,
+                sample_id = Sample.ID,
+                PrimaryMelanoma = Type.of.Primary) %>%
+  dplyr::mutate(os_binary = ifelse(OS.Time >= 24, "1", "0")) %>% 
+  dplyr::arrange(mut_load)
+
+cbPalette <- c("#56B4E9", "#999999", "purple", "#E69F00", "#D55E00", "#CC79A7", "#009E73", "#F0E442", "#0072B2")
+
+p1 <- ggplot(pat_df, aes(x = reorder(sample_id, mut_load), y = mut_load, fill = patient_response)) +
+  geom_bar(stat = "identity", width = 0.7, linewidth = 0.5, color = "black") +
+  scale_fill_manual(values = c("R" = "darkgreen", "NR" = "darkred"),
+                    labels = c("R" = "Responders", "NR" = "Non-responders")) +
+  labs(x = NULL, 
+       y = "Mutation Load",
+       fill = "Patient Response") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(), 
+        axis.ticks.x = element_blank(),
+        legend.position = "right")
+
+p2 <- make_annotation_plot(pat_df, "RECIST", "RECIST", 1, c("PD" = "PD", "SD" = "SD", "PR" = "PR", "CR" = "CR"))
+p3 <- make_annotation_plot(pat_df, "os_binary", "Overall survival (OS)", 5, c("1" = "OS >= 24", "0" = "OS < 24"))
+p4 <- make_annotation_plot(pat_df, "PrimaryMelanoma", "Type of primary melanoma", 7, c("mucosa" = "Mucosal", "skin" = "Cutaneous", "unknown" = "Unknown"), show_sample_id = TRUE)
+
+# Extract legends
+legends <- list(
+  p1_legend = get_legend(p1),
+  p2_legend = get_legend(p2),
+  p3_legend = get_legend(p3),
+  p4_legend = get_legend(p4)
+)
+
+# Combine plots with legends
+combined_plot <- (p1 + theme(legend.position = "none")) /
+                 (p2 + theme(legend.position = "none")) /
+                 (p3 + theme(legend.position = "none")) /
+                 (p4 + theme(legend.position = "none")) /
+  plot_layout(nrow=4, ncol=1)
+
+combined_legends <- (as_ggplot(legends$p1_legend)) +
+                    (as_ggplot(legends$p2_legend)) +
+                    (as_ggplot(legends$p3_legend)) +
+                    (as_ggplot(legends$p4_legend)) +
+  plot_layout(nrow=1, ncol=4)
+
+final_plot <- combined_plot / combined_legends +
+  plot_layout(nrow=5, ncol=1, heights=c(4, 0.3, 0.3, 0.3, 2))
+  
+# Save and print the plot
+plot_path <- file.path(figures_pc_path, 
+                      "pat_char_summary.png")
+ggsave(plot_path, final_plot, width = 8, height = 6, dpi = 300)
+print(final_plot)
+```
+
 ## Session Info
   
 ```{r}

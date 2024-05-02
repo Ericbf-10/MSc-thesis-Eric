@@ -43,6 +43,18 @@ if (!requireNamespace("BiocManager", quietly = TRUE)) {
 if (!requireNamespace("VennDiagram", quietly = TRUE)) {
   install.packages("VennDiagram")
 }
+if (!requireNamespace("circlize", quietly = TRUE)) {
+  install.packages("circlize")
+}
+if (!requireNamespace("gridtext", quietly = TRUE)) {
+  install.packages("gridtext")
+}
+if (!requireNamespace("patchwork", quietly = TRUE)) {
+  install.packages("patchwork")
+}
+if (!requireNamespace("ggpubr", quietly = TRUE)) {
+  install.packages("ggpubr")
+}
 if (!("VariantAnnotation" %in% installed.packages())) {
   # Install this package if it isn't installed yet
   BiocManager::install("VariantAnnotation", update = FALSE)
@@ -90,4 +102,8 @@ if (!("GO.db" %in% installed.packages())) {
 if (!("AnnotationDbi" %in% installed.packages())) {
   # Install this package if it isn't installed yet
   BiocManager::install("AnnotationDbi", update = FALSE)
+}
+if (!("ComplexHeatmap" %in% installed.packages())) {
+  # Install this package if it isn't installed yet
+  BiocManager::install("ComplexHeatmap", update = FALSE)
 }

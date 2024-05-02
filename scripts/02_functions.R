@@ -5,11 +5,16 @@
 ### Functions needed for the project
 
 ## Load libraries
+library(dplyr)
 library(msigdbr)
 library(fgsea)
 library(EnsDb.Hsapiens.v75)
 library(clusterProfiler)
 library(GO.db)
+library(ComplexHeatmap)
+library(circlize)
+library(reshape2)
+library(gridtext)
 
 # Set data.frame columns of type list to character
 set_lists_to_chars <- function(x) {
@@ -105,6 +110,30 @@ correct_date_like_symbols <- function(gene_ids) {
   })
 }
 
+# Function to make the patients characteristics plot (patchwork)
+make_annotation_plot <- function(df, var_name, title, col_start, custom_labels, show_sample_id = FALSE) {
+  plot <- ggplot(df, aes_string(x = reorder(df$sample_id, df$mut_load), y = "1", fill = var_name)) +
+    geom_tile(color = "black", linewidth = 0.5) +
+    scale_y_continuous(expand = c(0, 0), breaks = NULL) +
+    scale_fill_manual(values=cbPalette[col_start:length(cbPalette)], labels = custom_labels) +
+    labs(x = NULL, y = NULL, fill = title) +
+    theme_minimal() +
+    theme(axis.text.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          axis.text.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          legend.position = "right")
+  
+  # Conditionally add sample ID labels
+  if (show_sample_id) {
+    plot <- plot + 
+      geom_text(aes(label = reorder(df$sample_id, df$mut_load)), y = 0, vjust = 0, size = 3) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+  }
+  
+  return(plot)
+}
+
 # Function to search GO terms by keyword
 searchGOTerms <- function(keyword) {
   all_terms <- as.list(GOTERM)
@@ -136,26 +165,48 @@ sum_plot <- function(response_df, all_mut_df, nonsyn_mut_df, lof_mut_df, plot_pa
   
   # Recalculate the counts
   count_df <- combined_df %>%
-    group_by(sample_id, source) %>%
-    summarise(count = n(), .groups = 'drop') %>%
-    complete(sample_id = all_sample_ids, source, fill = list(count = 0)) %>% # Ensure every sample_id and source combination is represented
-    ungroup()
+    dplyr::group_by(sample_id, source) %>%
+    dplyr::summarise(count = n(), .groups = 'drop') %>%
+    tidyr::complete(sample_id = all_sample_ids, source, fill = list(count = 0)) %>% # Ensure every sample_id and source combination is represented
+    dplyr::ungroup()
     
   # Merge response info
   combined_data <- count_df %>%
     dplyr::left_join(response_df, by = "sample_id")
   
-  # Calculate the maximum count to set the y-axis limit dynamically
-  max_count <- max(combined_data$count, na.rm = TRUE)
-  buffer <- max_count * 0.1 # Add 10% buffer to the maximum count for the labels
+  # Define order R > NR
+  response_order <- combined_data %>%
+    dplyr::select(sample_id, patient_response) %>%
+    dplyr::distinct() %>%
+    dplyr::arrange(desc(patient_response)) # Arrange so that "R" comes before "NR"
+  
+  # Step 1: Create an ordered factor in 'response_order'
+  response_order <- response_order %>%
+    dplyr::mutate(order = as.integer(factor(sample_id, levels = unique(sample_id))))
+  
+  # Step 2: Join this order to 'combined_data'
+  # Step 3: Arrange 'combined_data' using the new order and then by 'source' to keep its internal order
+  ordered_data <- combined_data %>%
+    dplyr::left_join(response_order %>% 
+                     dplyr::select(sample_id, order), by = "sample_id") %>% 
+    dplyr::arrange(order, source) %>%
+    dplyr::select(-order) %>% # Optionally remove the 'order' column if it's no longer needed
+    dplyr::mutate(facet_label = paste(sample_id, "-", patient_response)) %>%
+    dplyr::mutate(sample_id = factor(sample_id, levels = unique(sample_id)))
+  
+  ordered_data$facet_label <- factor(ordered_data$facet_label, levels = unique(ordered_data$facet_label))
+  
+  # Calculate the maximum count and buffer again just in case
+  max_count <- max(ordered_data$count, na.rm = TRUE)
+  buffer <- max_count * 0.1
   
   # Generate the plot with the adjusted source ordering
-  bar_plot <- ggplot(combined_data, aes(x = source, y = count, fill = source)) +
+  bar_plot <- ggplot(ordered_data, aes(x = source, y = count, fill = source)) +
     geom_bar(stat = "identity", position = position_dodge()) +
     geom_text(aes(label = count), vjust = -0.5, position = position_dodge(0.9)) +
     scale_fill_manual(values = c("All" = "darkblue", "Nonsyn" = "darkred", "LoF" = "darkgreen"),
                       name = "Mutation Type") +
-    facet_wrap(~ paste(sample_id, patient_response), scales = "free_x") +
+    facet_wrap(~ facet_label, scales = "free_x") +
     labs(x = "Mutation Type", 
          y = "Count", 
          title = "Number of mutations per patient") +
@@ -435,7 +486,65 @@ plot_top5 <- function(response_df, mut_df, plot_path, fig_title, fig_y_label) {
   return(top5_plot)
 }
 
-# Bubble Plot all Gene Sets across samples stratified by response
+# Bubble Plot all Gene Sets across samples with pvalue significance
+bubble_plot_pval <- function(response_df, mut_df, plot_path, fig_title, fig_y_label) {
+  
+  # Prepare data for all samples in the df: Filter padjust < 0.05 & calculate Gene ratio per sample
+  prepared_data_df <- mut_df %>%
+    dplyr::group_by(sample_id) %>%
+    dplyr::filter(padj < 0.05) %>%
+    dplyr::mutate(Gene_ratio = overlap / size,
+                  Count = overlap) %>%
+    dplyr::arrange(sample_id, desc(Count)) %>%
+    dplyr::ungroup()
+  
+  # Calculate dynamic breaks and labels for Count
+  count_breaks <- quantile(prepared_data_df$Count, probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
+  count_breaks <- round(count_breaks) # Ensure count_breaks are integers by rounding
+  count_breaks <- count_breaks[count_breaks > 0] # Remove 0 values from count_breaks
+  count_breaks <- unique(count_breaks) # Make sure breaks are unique
+  
+  # Dynamically generate count_labels based on the available count_breaks
+  count_labels <- vector("character", length(count_breaks))
+  for (i in seq_along(count_breaks)) {
+    count_labels[i] <- as.character(count_breaks[i])
+  }
+  
+  # Step 2: Plot
+  bubble_plot <- ggplot(prepared_data_df, aes(x = Gene_ratio,
+                                         y = reorder(pathway, Count),
+                                         size = Count,
+                                         color = padj)) +
+    geom_point() +
+    scale_color_gradient(low = "blue", high = "red", trans = "log10", # Log10 transformation for a better visualization
+                         limits = c(1e-6, 1), oob = scales::oob_squish) +
+    scale_size_continuous(name = "Count",
+                          range = c(1, 6),  # Adjust the visual size range as needed
+                          breaks = count_breaks,
+                          labels = count_labels) +
+    theme_minimal() +
+    theme(
+      panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+      panel.grid.minor = element_blank(),
+      panel.background = element_rect(fill = "white", colour = "black"),
+      plot.background = element_rect(fill = "white", colour = NA),
+      legend.position = "right",
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    ) +
+    labs(title = fig_title,
+         x = "Gene Ratio",
+         y = fig_y_label,
+         color = "p.adjust (log10)",
+         size = "Count")
+  
+  # Save plot
+  ggsave(plot_path, bubble_plot, width = 15, height = 20, dpi = 300)
+  
+  # Return
+  return(bubble_plot)
+}
+
+# Bubble Plot all Gene Sets across samples stratified by response (no pval)
 bubble_plot_all <- function(response_df, mut_df, plot_path, fig_title, fig_y_label) {
   
   # Prepare data for all samples in the df: calculate Gene ratio per sample, do not filter by p.adjust and keep all GS
@@ -477,7 +586,7 @@ bubble_plot_all <- function(response_df, mut_df, plot_path, fig_title, fig_y_lab
                                            size = Count,
                                            color = patient_response)) +
     geom_point() +
-    scale_color_manual(values = c("R" = "blue", "NR" = "red"), 
+    scale_color_manual(values = c("R" = "darkgreen", "NR" = "darkred"), 
                        name = "Response",
                        labels = c("R" = "Responders", "NR" = "Non-responders")) +
     scale_size_continuous(name = "Count",
@@ -686,6 +795,136 @@ boxplot_genesets <- function(geneset, response_df, mut_df, plot_path, fig_title,
   return(geneset_boxplot)
 }
 
+# Heat Map of combined GS across samples using ComplexHeatmap
+complex_heatmap_genesets <- function(response_df, mut_df, plot_path, fig_title, width, height) {
+  
+  # Join response info and prepare data
+  prepared_data_df <- mut_df %>%
+    dplyr::left_join(response_df, by = "sample_id") %>%
+    dplyr::mutate(Gene_ratio = overlap / size, Count = overlap)
+  
+  # Convert the data frame to a wide format and then to a matrix
+  wide_data <- reshape2::dcast(prepared_data_df, pathway ~ sample_id, value.var = "Count", fill = 0)
+  rownames(wide_data) <- wide_data$pathway
+  wide_data$pathway <- NULL
+  heat_matrix <- data.matrix(wide_data)
+  
+  # Make sure response_df is ordered to match the sample_id order in heat_matrix
+  sample_responses <- response_df %>%
+    dplyr::filter(sample_id %in% colnames(heat_matrix)) %>%
+    dplyr::select(sample_id, patient_response) %>%
+    dplyr::distinct() %>%
+    dplyr::arrange(factor(sample_id, levels = colnames(heat_matrix)))
+  
+  # Create annotations for samples based on response
+  response_annotation <- HeatmapAnnotation(df = data.frame(Response = factor(sample_responses$patient_response, levels = c("R", "NR"))),
+                                           col = list(Response = c("R" = "darkgreen", "NR" = "darkred")),
+                                           which = "col", 
+                                           annotation_name_side = "left")
+  
+  # Draw the heatmap
+  pdf(file = plot_path, width = width, height = height)
+  heat_map_plot <- Heatmap(heat_matrix, name = "Count", 
+                           bottom_annotation = response_annotation,
+                           column_dend_side = "bottom",
+                           row_names_side = "left",
+                           show_row_names = TRUE, 
+                           show_column_names = TRUE, 
+                           column_title = gt_render(
+                             paste0(fig_title, "<br>",
+                                    "Samples")),
+                           column_title_side = "top",
+                           # row_title = "Ubiquitin Gene Sets", # Can't avoid overlapping
+                           row_title_side = "left",  # Place row title on the left side
+                           col = colorRampPalette(c("white", "blue"))(100),
+                           column_names_side = "bottom",
+                           show_row_dend = FALSE,
+                           cell_fun = function(j, i, x, y, width, height, fill) {
+                             grid.rect(x, y, width, height, gp = gpar(fill = fill, col = "black", lwd = 0.5))
+                           })
+  
+  # Print the heatmap and save it
+  draw(heat_map_plot, heatmap_legend_side = 'right', annotation_legend_side = 'right', padding = unit(c(10, 70, 10, 10), "mm"))
+  
+  # Decorate the annotation to add vertical lines
+  decorate_annotation("Response", {
+    grid.rect(gp = gpar(fill = NA, col = "black", lwd = 1))  # Draw a border around the annotation
+    for(i in seq_along(sample_responses$sample_id)[-1]) {
+      grid.lines(x = unit(i+11.5, "native") - unit(0.5, "npc"), y = unit(c(0, 1), "npc"),
+                 gp = gpar(col = "black", lwd = 1))  # Thicker lines
+    }
+  })
+  
+  dev.off()
+}
+
+# Heat Map of cellular location across samples using ComplexHeatmap
+complex_heatmap_cell_loc <- function(mut_df, plot_path, fig_title, width, height) {
+  
+  # Split the cell_loc by '|', and unnest to long format
+  count_cell_loc_df <- mut_df %>%
+    dplyr::mutate(cell_loc = strsplit(cell_loc, "\\|")) %>%
+    tidyr::unnest(cell_loc) %>%
+    dplyr::group_by(sample_id, cell_loc) %>%
+    dplyr::summarise(count = n(), .groups = 'drop')
+  
+  # Convert the data frame to a wide format and then to a matrix
+  wide_data <- reshape2::dcast(count_cell_loc_df, cell_loc ~ sample_id, value.var = "count", fill = 0)
+  rownames(wide_data) <- wide_data$cell_loc
+  wide_data$cell_loc <- NULL
+  heat_matrix <- data.matrix(wide_data)
+  
+  # Make sure response_df is ordered to match the sample_id order in heat_matrix
+  sample_responses <- response_df %>%
+    dplyr::filter(sample_id %in% colnames(heat_matrix),
+                  patient_response %in% mut_df$patient_response) %>%
+    dplyr::select(sample_id, patient_response) %>%
+    dplyr::distinct() %>%
+    dplyr::arrange(factor(sample_id, levels = colnames(heat_matrix)))
+  
+  # Create annotations for samples based on response
+  response_annotation <- HeatmapAnnotation(df = data.frame(Response = factor(sample_responses$patient_response, levels = c("R", "NR"))),
+                                           col = list(Response = c("R" = "darkgreen", "NR" = "darkred")),
+                                           which = "col", 
+                                           annotation_name_side = "left")
+  
+  # Draw the heatmap
+  png(file = plot_path, width = width, height = height)
+  heat_map_plot <- Heatmap(heat_matrix, 
+                           name = "Count", 
+                           bottom_annotation = response_annotation,
+                           column_dend_side = "bottom",
+                           row_names_side = "left",
+                           show_row_names = TRUE, 
+                           show_column_names = TRUE, 
+                           column_title = gt_render(
+                             paste0(fig_title, "<br>",
+                                    "Sample ID")),
+                           column_title_side = "top",
+                           row_title = "Cellular Location",
+                           row_title_side = "left",  # Place row title on the left side
+                           col = colorRampPalette(c("white", "blue"))(100),
+                           column_names_side = "bottom",
+                           show_row_dend = FALSE,
+                           cell_fun = function(j, i, x, y, width, height, fill) {
+                             grid.rect(x, y, width, height, gp = gpar(fill = fill, col = "black", lwd = 0.5))
+                           })
+  
+  # Print the heatmap and save it
+  draw(heat_map_plot, heatmap_legend_side = 'right', annotation_legend_side = 'right', padding = unit(c(10, 70, 10, 10), "mm"))
+  
+  # Decorate the annotation to add vertical lines
+  decorate_annotation("Response", {
+    grid.rect(gp = gpar(fill = NA, col = "black", lwd = 1))  # Draw a border around the annotation
+    for(i in seq_along(sample_responses$sample_id)[-1]) {
+      grid.lines(x = unit(i+10, "native") - unit(0.5, "npc"), y = unit(c(0, 1), "npc"),
+                 gp = gpar(col = "black", lwd = 1))  # Thicker lines
+    }
+  })
+  
+  dev.off()
+}
+
 # Heat Map of combined GS across samples
 heat_map_genesets <- function(response_df, mut_df, plot_path, fig_title) {
   
@@ -708,7 +947,7 @@ heat_map_genesets <- function(response_df, mut_df, plot_path, fig_title) {
                                                                   y = pathway, 
                                                                   fill = Count)) +
     ggplot2::geom_tile(color = "black", linewidth = 0.2) +
-    ggplot2::scale_fill_gradient(low = "green", high = "red") +
+    ggplot2::scale_fill_gradient(low = "white", high = "red") +
     ggplot2::theme_minimal() +
     ggplot2::labs(title = fig_title, y = "Gene Set", x = "Sample ID", fill = "Count") +
     ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))

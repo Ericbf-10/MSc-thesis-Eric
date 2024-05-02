@@ -190,7 +190,7 @@ fora_results_all_csv_path <- file.path(results_gor_path, "fora_results_c5cc_all.
 fora_results_nonsyn_csv_path <- file.path(results_gor_path, "fora_results_c5cc_nonsyn.csv")
 fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_c5cc_lof.csv")
 
-# # Perform FORA analysis for H Gene Sets
+# # Perform FORA analysis for CC Gene Sets
 # perform_fora_analysis(sample_id_list, list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, category="C5", subcategory="CC")
 
 # Load fora results

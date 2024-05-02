@@ -284,8 +284,8 @@ Sample MM909_47 does not have any Ubiquitin-related gene, and MM909_14, MM909_36
 
 # Build a DB of GO terms for ubiquitin-related Bio Processes (based on gene list)
 
-#### Get all GO.db ubiquitin terms (query=Ub genes).
-#### Query GO database using mygene to find GO terms for Ub genes.
+#### Get all GO.db terms.
+#### Query GO database using mygene to find GO terms for Ub genes (gmt file).
 #### Use grch37 and PFAM to recover lost genes. The rest annotate manually: Ensembl & UniProt mainly.
 #### Define categories. Define which parent terms I want to use and get offspring.
 #### Build the DB with Category > Parent > Children.
@@ -1158,7 +1158,7 @@ final_ub_db <- annot_ub_glist_df3 %>%
   dplyr::filter(!is.na(go_parent_id)) %>% 
   dplyr::distinct()
 
-# Check if any genes belongs to 2 different categories
+# Check if any genes belong to 2 different categories
 # Group by ensembl_id and summarize the unique categories and related GO details
 ensembl_category_details <- final_ub_db %>%
   group_by(ensembl_id) %>%
@@ -1274,6 +1274,171 @@ datatable(final_parent_gene_count,
 
 NOTE: The category table has unique Ensembl gene IDs, but the parent table does not, since it can happen that the same gene is annotated to different parents.
 
+## FORA using ub_db
+
+```{r, message=FALSE, warning=FALSE}
+#10 Perform FORA analysis
+# Define paths
+fora_results_all_csv_path <- file.path(results_ubgenesets_path, "fora_results_ubiquitin_all.csv")
+fora_results_nonsyn_csv_path <- file.path(results_ubgenesets_path, "fora_results_ubiquitin_nonsyn.csv")
+fora_results_lof_csv_path <- file.path(results_ubgenesets_path, "fora_results_ubiquitin_lof.csv")
+
+# Create gene_sets_df with a list of ensembl_id for each go_parent_id
+gene_sets_df <- final_ub_db_df %>%
+  dplyr::group_by(go_parent_id) %>%
+  dplyr::summarise(ensembl_id = list(ensembl_id), .groups = 'drop')
+
+# Adding go_parent_term
+gene_sets_df <- gene_sets_df %>%
+  dplyr::mutate(go_parent_term = map_chr(go_parent_id, function(id) {
+    # Access the term for the given GO ID
+    term <- tryCatch({
+      eval(parse(text = paste0("all_go_terms$`", id, "`@Term")))
+    }, error = function(e) NA)
+    return(term)
+  })) %>% 
+  dplyr::select(go_parent_term, ensembl_id, -go_parent_id)
+
+# Convert the dataframe to a named list
+gene_sets_list <- setNames(gene_sets_df$ensembl_id, gene_sets_df$go_parent_term)
+
+# Perform FORA analysis for Ubiquitin Gene Sets
+# perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, gene_sets_list=gene_sets_list)
+
+# Load fora results
+fora_results_ubiquitin_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
+fora_results_ubiquitin_nonsyn_df <- read.csv(fora_results_nonsyn_csv_path, header = TRUE)[ , -1]
+fora_results_ubiquitin_lof_df <- read.csv(fora_results_lof_csv_path, header = TRUE)[ , -1]
+```
+
+<!-- ## Visualization: Top Custom Ubiquitin GS across samples stratified by response (All mutations) -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=6} -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_all_plot_path <- file.path(figures_ubgenesets_path, -->
+<!--                               "mm909_ubiquitin_all_plot.png") -->
+
+<!-- mm909_ubiquitin_all_plot <- plot_top5(response_df, fora_results_ubiquitin_all_df, mm909_ubiquitin_all_plot_path, "FORA with top Custom Ubiquitin GS across samples (All mutations)", "Top Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_all_plot) -->
+<!-- ``` -->
+
+<!-- ### Visualization: Top Custom Ubiquitin GS across samples stratified by response (Nonsyn mutations) -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=6} -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_nonsyn_plot_path <- file.path(figures_ubgenesets_path, -->
+<!--                               "mm909_ubiquitin_nonsyn_plot.png") -->
+
+<!-- mm909_ubiquitin_nonsyn_plot <- plot_top5(response_df, fora_results_ubiquitin_nonsyn_df, mm909_ubiquitin_nonsyn_plot_path, "FORA with top Custom Ubiquitin GS across samples (Nonsyn mutations)", "Top Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_nonsyn_plot) -->
+<!-- ``` -->
+
+### Visualization: Top Custom Ubiquitin GS across samples stratified by response (LoF mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=10}
+# Define output path
+mm909_ubiquitin_lof_plot_path <- file.path(figures_ubgenesets_path,
+                              "mm909_ubiquitin_lof_plot.png")
+
+mm909_ubiquitin_lof_plot <- bubble_plot_all(response_df, fora_results_ubiquitin_lof_df, mm909_ubiquitin_lof_plot_path, "FORA with top Custom Ubiquitin GS across samples (LoF mutations)", "Top Ubiquitin Gene Sets")
+
+print(mm909_ubiquitin_lof_plot)
+```
+
+### Visualization: Global heat map
+
+This does not have the filter p.adjust < 0.05.
+
+```{r, warning=FALSE, message=FALSE, fig.width=10, fig.height=10}
+plot_path <- file.path(figures_ubgenesets_path, "mm909_combinedGS_lof_heat_map.pdf")
+combinedGS_lof_plot <- complex_heatmap_genesets(response_df, fora_results_ubiquitin_lof_df, plot_path, 
+                                    "Heat Map of combined Gene Sets per patient", 16, 12)
+
+# Print
+print(combinedGS_lof_plot)
+```
+
+## Repeat FORA focusing on categories only
+
+```{r, warning=FALSE, message=FALSE}
+#10 Perform FORA analysis
+# Define paths
+fora_results_all_csv_path2 <- file.path(results_ubgenesets_path, "fora_results_ubiquitin_cat_all.csv")
+fora_results_nonsyn_csv_path2 <- file.path(results_ubgenesets_path, "fora_results_ubiquitin_cat_nonsyn.csv")
+fora_results_lof_csv_path2 <- file.path(results_ubgenesets_path, "fora_results_ubiquitin_cat_lof.csv")
+
+# Create gene_sets_df with a list of ensembl_id for each go_parent_id
+gene_sets_df <- final_ub_db_df %>%
+  dplyr::group_by(category) %>%
+  dplyr::summarise(ensembl_id = list(ensembl_id), .groups = 'drop')
+
+# Convert the dataframe to a named list
+gene_sets_list <- setNames(gene_sets_df$ensembl_id, gene_sets_df$category)
+
+# Perform FORA analysis for Ubiquitin Gene Sets
+# perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path2, fora_results_nonsyn_csv_path2, fora_results_lof_csv_path2, gene_sets_list=gene_sets_list)
+
+# Load fora results
+fora_results_ubiquitin_all_df2 <- read.csv(fora_results_all_csv_path2, header = TRUE)[ , -1]
+fora_results_ubiquitin_nonsyn_df2 <- read.csv(fora_results_nonsyn_csv_path2, header = TRUE)[ , -1]
+fora_results_ubiquitin_lof_df2 <- read.csv(fora_results_lof_csv_path2, header = TRUE)[ , -1]
+```
+
+<!-- ## Visualization: Top Custom Ubiquitin GS across samples stratified by response (All mutations) -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=6} -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_all_plot_path2 <- file.path(figures_ubgenesets_path, -->
+<!--                               "mm909_ubiquitin_cat_all_plot.png") -->
+
+<!-- mm909_ubiquitin_all_plot <- plot_top5(response_df, fora_results_ubiquitin_all_df2, mm909_ubiquitin_all_plot_path2, "FORA with top Custom Ubiquitin GS across samples (All mutations)", "Top Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_all_plot) -->
+<!-- ``` -->
+
+<!-- ### Visualization: Top Custom Ubiquitin GS across samples stratified by response (Nonsyn mutations) -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=6} -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_nonsyn_plot_path2 <- file.path(figures_ubgenesets_path, -->
+<!--                               "mm909_ubiquitin_cat_nonsyn_plot.png") -->
+
+<!-- mm909_ubiquitin_nonsyn_plot <- plot_top5(response_df, fora_results_ubiquitin_nonsyn_df2, mm909_ubiquitin_nonsyn_plot_path2, "FORA with top Custom Ubiquitin GS across samples (Nonsyn mutations)", "Top Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_nonsyn_plot) -->
+<!-- ``` -->
+
+### Visualization: Top Custom Ubiquitin GS across samples stratified by response (LoF mutations)
+
+This does not have the filter p.adjust < 0.05.
+
+```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=3}
+# Define output path
+mm909_ubiquitin_lof_plot_path2 <- file.path(figures_ubgenesets_path,
+                              "mm909_ubiquitin_cat_lof_plot.png")
+
+mm909_ubiquitin_lof_plot2 <- bubble_plot_all(response_df, fora_results_ubiquitin_lof_df2, mm909_ubiquitin_lof_plot_path2, "FORA with top Custom Ubiquitin GS across samples (LoF mutations)", "Top Ubiquitin Gene Sets")
+
+print(mm909_ubiquitin_lof_plot2)
+```
+
+### Visualization: Global heat map
+
+This does not have the filter p.adjust < 0.05.
+
+```{r, warning=FALSE, message=FALSE, fig.width=10, fig.height=3}
+plot_path <- file.path(figures_ubgenesets_path, "mm909_combinedGS_cat_lof_heat_map.pdf")
+combinedGS_lof_plot <- complex_heatmap_genesets(response_df, fora_results_ubiquitin_lof_df2, plot_path,
+                                    "Heat Map of combined Gene Sets per patient", 16, 6)
+
+# Print
+print(combinedGS_lof_plot)
+```
+
+## FORA using mygene to annotate Ensembl Gene IDs to GO parent terms
+
 ```{r, message=FALSE, warning=FALSE}
 #9 Annotate Ensembl Gene IDs to each parent go term to do FORA
 # Query the database to find Ensembl IDs for each GO term
@@ -1316,9 +1481,9 @@ raw_go2ensembl_df <- raw_go2ensembl_df %>%
 
 #10 Perform FORA analysis
 # Define paths
-fora_results_all_csv_path <- file.path(results_ubgenesets_path, "fora_results_ubiquitin_all.csv")
-fora_results_nonsyn_csv_path <- file.path(results_ubgenesets_path, "fora_results_ubiquitin_nonsyn.csv")
-fora_results_lof_csv_path <- file.path(results_ubgenesets_path, "fora_results_ubiquitin_lof.csv")
+fora_results_all_csv_path_mygene <- file.path(results_ubgenesets_path, "fora_results_ubiquitin_all_mygene.csv")
+fora_results_nonsyn_csv_path_mygene <- file.path(results_ubgenesets_path, "fora_results_ubiquitin_nonsyn_mygene.csv")
+fora_results_lof_csv_path_mygene <- file.path(results_ubgenesets_path, "fora_results_ubiquitin_lof_mygene.csv")
 
 # Adapt structure to gene_sets_list
 gene_sets_df <- raw_go2ensembl_df %>% 
@@ -1329,12 +1494,12 @@ gene_sets_df <- raw_go2ensembl_df %>%
 gene_sets_list <- setNames(gene_sets_df$ensembl_ids, gene_sets_df$go_parent_term)
 
 # Perform FORA analysis for Ubiquitin Gene Sets
-# perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, gene_sets_list=gene_sets_list)
+# perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path_mygene, fora_results_nonsyn_csv_path_mygene, fora_results_lof_csv_path_mygene, gene_sets_list=gene_sets_list)
 
 # Load fora results
-fora_results_ubiquitin_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
-fora_results_ubiquitin_nonsyn_df <- read.csv(fora_results_nonsyn_csv_path, header = TRUE)[ , -1]
-fora_results_ubiquitin_lof_df <- read.csv(fora_results_lof_csv_path, header = TRUE)[ , -1]
+fora_results_ubiquitin_all_df_mygene <- read.csv(fora_results_all_csv_path_mygene, header = TRUE)[ , -1]
+fora_results_ubiquitin_nonsyn_df_mygene <- read.csv(fora_results_nonsyn_csv_path_mygene, header = TRUE)[ , -1]
+fora_results_ubiquitin_lof_df_mygene <- read.csv(fora_results_lof_csv_path_mygene, header = TRUE)[ , -1]
 ```
 
 <!-- ## Visualization: Top Custom Ubiquitin GS across samples stratified by response (All mutations) -->
@@ -1363,14 +1528,16 @@ fora_results_ubiquitin_lof_df <- read.csv(fora_results_lof_csv_path, header = TR
 
 ### Visualization: Top Custom Ubiquitin GS across samples stratified by response (LoF mutations)
 
+This does not have the filter p.adjust < 0.05.
+
 ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=6}
 # Define output path
-mm909_ubiquitin_lof_plot_path <- file.path(figures_ubgenesets_path,
-                              "mm909_ubiquitin_lof_plot.png")
+mm909_ubiquitin_lof_plot_path_mygene <- file.path(figures_ubgenesets_path,
+                              "mm909_ubiquitin_lof_plot_mygene.png")
 
-mm909_ubiquitin_lof_plot <- bubble_plot_all(response_df, fora_results_ubiquitin_lof_df, mm909_ubiquitin_lof_plot_path, "FORA with top Custom Ubiquitin GS across samples (LoF mutations)", "Top Ubiquitin Gene Sets")
+mm909_ubiquitin_lof_plot_mygene <- bubble_plot_all(response_df, fora_results_ubiquitin_lof_df_mygene, mm909_ubiquitin_lof_plot_path_mygene, "FORA with top Custom Ubiquitin GS across samples (LoF mutations)", "Top Ubiquitin Gene Sets")
 
-print(mm909_ubiquitin_lof_plot)
+print(mm909_ubiquitin_lof_plot_mygene)
 ```
 
 <!-- ## Visualization: Box plot per 6 Gene Sets -->
@@ -1408,85 +1575,85 @@ print(mm909_ubiquitin_lof_plot)
 This does not have the filter p.adjust < 0.05.
 
 ```{r, warning=FALSE, message=FALSE, fig.width=10, fig.height=10}
-plot_path <- file.path(figures_ubgenesets_path, "mm909_combinedGS_lof_heat_map.png")
-combinedGS_lof_plot <- heat_map_genesets(response_df, fora_results_ubiquitin_lof_df, plot_path, 
-                                    "Heat Map of combined Gene Sets per patient")
+plot_path_mygene <- file.path(figures_ubgenesets_path, "mm909_combinedGS_lof_heat_map_mygene.pdf")
+combinedGS_lof_plot_mygene <- complex_heatmap_genesets(response_df, fora_results_ubiquitin_lof_df_mygene, plot_path_mygene, 
+                                    "Heat Map of combined Gene Sets per patient", 16, 12)
 
 # Print
-print(combinedGS_lof_plot)
+print(combinedGS_lof_plot_mygene)
 ```
 
-## Repeat FORA focusing on categories only
+<!-- ## Repeat FORA focusing on categories only -->
 
-```{r, warning=FALSE, message=FALSE}
-# map_category2parent_df <- final_ub_db_df %>%
-#   dplyr::select(ensembl_id, category, go_parent_id)
-#
-# # Adding go_parent_term
-# parent2category_df <- raw_go2ensembl_df %>%
-#   dplyr::left_join(map_category2parent_df, by=c("ensembl_id", "go_parent_id"))
+<!-- ```{r, warning=FALSE, message=FALSE} -->
+<!-- # map_category2parent_df <- final_ub_db_df %>% -->
+<!-- #   dplyr::select(ensembl_id, category, go_parent_id) -->
+<!-- # -->
+<!-- # # Adding go_parent_term -->
+<!-- # parent2category_df <- raw_go2ensembl_df %>% -->
+<!-- #   dplyr::left_join(map_category2parent_df, by=c("ensembl_id", "go_parent_id")) -->
 
-# Adding category
-# Initialize an empty list to hold the mapping
-go_mapping4 <- list()
+<!-- # Adding category -->
+<!-- # Initialize an empty list to hold the mapping -->
+<!-- go_mapping4 <- list() -->
 
-# Iterate through each category in ub_db
-for (category in names(ub_db)) {
-  # Iterate through each parent within a category
-  for (parent_id in names(ub_db[[category]])) {
-    # Iterate through each child within a parent
-    children_ids <- ub_db[[category]][[parent_id]]
-    for (child_id in children_ids) {
-      # Append the category and parent information to the mapping list for each child
-      if (!is.null(go_mapping4[[child_id]])) {
-        go_mapping4[[child_id]] <- unique(c(go_mapping4[[child_id]], paste(parent_id, category, sep = "|")))
-      } else {
-        go_mapping4[[child_id]] <- paste(parent_id, category, sep = "|")
-      }
-    }
-  }
-}
+<!-- # Iterate through each category in ub_db -->
+<!-- for (category in names(ub_db)) { -->
+<!--   # Iterate through each parent within a category -->
+<!--   for (parent_id in names(ub_db[[category]])) { -->
+<!--     # Iterate through each child within a parent -->
+<!--     children_ids <- ub_db[[category]][[parent_id]] -->
+<!--     for (child_id in children_ids) { -->
+<!--       # Append the category and parent information to the mapping list for each child -->
+<!--       if (!is.null(go_mapping4[[child_id]])) { -->
+<!--         go_mapping4[[child_id]] <- unique(c(go_mapping4[[child_id]], paste(parent_id, category, sep = "|"))) -->
+<!--       } else { -->
+<!--         go_mapping4[[child_id]] <- paste(parent_id, category, sep = "|") -->
+<!--       } -->
+<!--     } -->
+<!--   } -->
+<!-- } -->
 
-# Convert the mapping list to a data.frame for easier manipulation
-go_mapping_df4 <- stack(go_mapping4)
-names(go_mapping_df4) <- c("info", "go_id")
+<!-- # Convert the mapping list to a data.frame for easier manipulation -->
+<!-- go_mapping_df4 <- stack(go_mapping4) -->
+<!-- names(go_mapping_df4) <- c("info", "go_id") -->
 
-# Split info into go_parent_id and category
-go_mapping_df4 <- go_mapping_df4 %>%
-  tidyr::separate(info, into = c("go_parent_id", "category"), sep = "\\|") %>%
-  dplyr::select(go_parent_id, category) %>%
-  dplyr::distinct()
+<!-- # Split info into go_parent_id and category -->
+<!-- go_mapping_df4 <- go_mapping_df4 %>% -->
+<!--   tidyr::separate(info, into = c("go_parent_id", "category"), sep = "\\|") %>% -->
+<!--   dplyr::select(go_parent_id, category) %>% -->
+<!--   dplyr::distinct() -->
 
-# Join the mapping information back to the original data.frame
-parent2category_df <- raw_go2ensembl_df %>%
-  left_join(go_mapping_df4, by = "go_parent_id")
+<!-- # Join the mapping information back to the original data.frame -->
+<!-- parent2category_df <- raw_go2ensembl_df %>% -->
+<!--   left_join(go_mapping_df4, by = "go_parent_id") -->
 
-# Fill NAs with ubiquitin_other
-parent2category_df <- parent2category_df %>% 
-  dplyr::mutate(category = if_else(is.na(category), "ubiquitin_other", category))
+<!-- # Fill NAs with ubiquitin_other -->
+<!-- parent2category_df <- parent2category_df %>%  -->
+<!--   dplyr::mutate(category = if_else(is.na(category), "ubiquitin_other", category)) -->
 
-#10 Perform FORA analysis
-# Define paths
-fora_results_all_csv_path2 <- file.path(results_ubgenesets_path, "fora_results_ubiquitin_cat_all.csv")
-fora_results_nonsyn_csv_path2 <- file.path(results_ubgenesets_path, "fora_results_ubiquitin_cat_nonsyn.csv")
-fora_results_lof_csv_path2 <- file.path(results_ubgenesets_path, "fora_results_ubiquitin_cat_lof.csv")
+<!-- #10 Perform FORA analysis -->
+<!-- # Define paths -->
+<!-- fora_results_all_csv_path2 <- file.path(results_ubgenesets_path, "fora_results_ubiquitin_cat_all.csv") -->
+<!-- fora_results_nonsyn_csv_path2 <- file.path(results_ubgenesets_path, "fora_results_ubiquitin_cat_nonsyn.csv") -->
+<!-- fora_results_lof_csv_path2 <- file.path(results_ubgenesets_path, "fora_results_ubiquitin_cat_lof.csv") -->
 
-# Adapt structure to gene_sets_list
-gene_sets_df2 <- parent2category_df %>%
-  dplyr::group_by(category) %>%
-  dplyr::summarise(ensembl_ids = list(unique(ensembl_id)), .groups = 'drop')
+<!-- # Adapt structure to gene_sets_list -->
+<!-- gene_sets_df2 <- parent2category_df %>% -->
+<!--   dplyr::group_by(category) %>% -->
+<!--   dplyr::summarise(ensembl_ids = list(unique(ensembl_id)), .groups = 'drop') -->
 
-# Convert the dataframe to a named list
-gene_sets_list2 <- setNames(gene_sets_df2$ensembl_ids, gene_sets_df2$category)
+<!-- # Convert the dataframe to a named list -->
+<!-- gene_sets_list2 <- setNames(gene_sets_df2$ensembl_ids, gene_sets_df2$category) -->
 
-# Perform FORA analysis for Ubiquitin Gene Sets
-# perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path2, fora_results_nonsyn_csv_path2, fora_results_lof_csv_path2, gene_sets_list=gene_sets_list2)
+<!-- # Perform FORA analysis for Ubiquitin Gene Sets -->
+<!-- # perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path2, fora_results_nonsyn_csv_path2, fora_results_lof_csv_path2, gene_sets_list=gene_sets_list2) -->
 
-# Load fora results
-fora_results_ubiquitin_all_df2 <- read.csv(fora_results_all_csv_path2, header = TRUE)[ , -1]
-fora_results_ubiquitin_nonsyn_df2 <- read.csv(fora_results_nonsyn_csv_path2, header = TRUE)[ , -1]
-fora_results_ubiquitin_lof_df2 <- read.csv(fora_results_lof_csv_path2, header = TRUE)[ , -1]
-```
+<!-- # Load fora results -->
+<!-- fora_results_ubiquitin_all_df2 <- read.csv(fora_results_all_csv_path2, header = TRUE)[ , -1] -->
+<!-- fora_results_ubiquitin_nonsyn_df2 <- read.csv(fora_results_nonsyn_csv_path2, header = TRUE)[ , -1] -->
+<!-- fora_results_ubiquitin_lof_df2 <- read.csv(fora_results_lof_csv_path2, header = TRUE)[ , -1] -->
+<!-- ``` -->
 
 <!-- ## Visualization: Top Custom Ubiquitin GS across samples stratified by response (All mutations) -->
 
@@ -1512,30 +1679,32 @@ fora_results_ubiquitin_lof_df2 <- read.csv(fora_results_lof_csv_path2, header = 
 <!-- print(mm909_ubiquitin_nonsyn_plot) -->
 <!-- ``` -->
 
-### Visualization: Top Custom Ubiquitin GS across samples stratified by response (LoF mutations)
+<!-- ### Visualization: Top Custom Ubiquitin GS across samples stratified by response (LoF mutations) -->
 
-```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=6}
-# Define output path
-mm909_ubiquitin_lof_plot_path2 <- file.path(figures_ubgenesets_path,
-                              "mm909_ubiquitin_cat_lof_plot.png")
+<!-- This does not have the filter p.adjust < 0.05. -->
 
-mm909_ubiquitin_lof_plot <- bubble_plot_all(response_df, fora_results_ubiquitin_lof_df2, mm909_ubiquitin_lof_plot_path2, "FORA with top Custom Ubiquitin GS across samples (LoF mutations)", "Top Ubiquitin Gene Sets")
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=6} -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_lof_plot_path2 <- file.path(figures_ubgenesets_path, -->
+<!--                               "mm909_ubiquitin_cat_lof_plot.png") -->
 
-print(mm909_ubiquitin_lof_plot)
-```
+<!-- mm909_ubiquitin_lof_plot <- bubble_plot_all(response_df, fora_results_ubiquitin_lof_df2, mm909_ubiquitin_lof_plot_path2, "FORA with top Custom Ubiquitin GS across samples (LoF mutations)", "Top Ubiquitin Gene Sets") -->
 
-### Visualization: Global heat map
+<!-- print(mm909_ubiquitin_lof_plot) -->
+<!-- ``` -->
 
-This does not have the filter p.adjust < 0.05.
+<!-- ### Visualization: Global heat map -->
 
-```{r, warning=FALSE, message=FALSE, fig.width=10, fig.height=3}
-plot_path <- file.path(figures_ubgenesets_path, "mm909_combinedGS_cat_lof_heat_map.png")
-combinedGS_lof_plot <- heat_map_genesets(response_df, fora_results_ubiquitin_lof_df2, plot_path,
-                                    "Heat Map of combined Gene Sets per patient")
+<!-- This does not have the filter p.adjust < 0.05. -->
 
-# Print
-print(combinedGS_lof_plot)
-```
+<!-- ```{r, warning=FALSE, message=FALSE, fig.width=10, fig.height=3} -->
+<!-- plot_path <- file.path(figures_ubgenesets_path, "mm909_combinedGS_cat_lof_heat_map.png") -->
+<!-- combinedGS_lof_plot <- heat_map_genesets(response_df, fora_results_ubiquitin_lof_df2, plot_path, -->
+<!--                                     "Heat Map of combined Gene Sets per patient") -->
+
+<!-- # Print -->
+<!-- print(combinedGS_lof_plot) -->
+<!-- ``` -->
 
 <!-- ### Visualization: Bubble plot per Gene Set -->
 
@@ -1565,8 +1734,7 @@ print(combinedGS_lof_plot)
 
 Some notes:
 
-- I don't know why I get so different results compared to Rmd06, I get much less genes annotated.
-- The plots belong to annotating Ensembl Gene IDs to go_parent_ids with the mygene package, it has nothing to do with ub_db.
+- The plots belong to annotating Ensembl Gene IDs to go_parent_ids with the mygene package, it has nothing to do with ub_db. This is why I get so different results compared to before, I get much less genes annotated.
 
 # Create a binary matrix (LoF - Ubiquitin)
 
