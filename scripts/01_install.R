@@ -75,6 +75,10 @@ if (!("EnsDb.Hsapiens.v75" %in% installed.packages())) {
   # Install this package if it isn't installed yet
   BiocManager::install("EnsDb.Hsapiens.v75", update = FALSE) # GRCh37 from Ensembl
 }
+if (!("EnsDb.Hsapiens.v86" %in% installed.packages())) {
+  # Install this package if it isn't installed yet
+  BiocManager::install("EnsDb.Hsapiens.v86", update = FALSE) # GRCh37 from Ensembl
+}
 if (!("fgsea" %in% installed.packages())) {
   # Install this package if it isn't installed yet
   BiocManager::install("fgsea", update = FALSE)
@@ -107,3 +111,5 @@ if (!("ComplexHeatmap" %in% installed.packages())) {
   # Install this package if it isn't installed yet
   BiocManager::install("ComplexHeatmap", update = FALSE)
 }
+# install.packages("devtools")
+# devtools::install_github("jowatson2011/subcellularvis")

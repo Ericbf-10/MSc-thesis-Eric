@@ -9,6 +9,7 @@ library(dplyr)
 library(msigdbr)
 library(fgsea)
 library(EnsDb.Hsapiens.v75)
+library(EnsDb.Hsapiens.v86)
 library(clusterProfiler)
 library(GO.db)
 library(ComplexHeatmap)
@@ -71,6 +72,20 @@ ENTREZtoENSEMBL <- function(x){
 # Convert Hugo Symbols to Ensembl Gene IDs
 SYMBOLtoENSEMBL <- function(x){
   vec=mapIds(EnsDb.Hsapiens.v75,
+             keys=x,
+             column="GENEID", # = ENSEMBL
+             keytype="SYMBOL",
+             multiVals="first")
+  repl=which(is.na(vec))
+  for(y in repl){
+    vec[y]=x[y]
+  }
+  return(vec)
+}
+
+# Convert Hugo Symbols to Ensembl Gene IDs
+SYMBOLtoENSEMBL38 <- function(x){
+  vec=mapIds(EnsDb.Hsapiens.v86,
              keys=x,
              column="GENEID", # = ENSEMBL
              keytype="SYMBOL",
@@ -859,7 +874,7 @@ complex_heatmap_genesets <- function(response_df, mut_df, plot_path, fig_title, 
 }
 
 # Heat Map of cellular location across samples using ComplexHeatmap
-complex_heatmap_cell_loc <- function(mut_df, plot_path, fig_title, width, height) {
+complex_heatmap_cell_loc <- function(response_df, mut_df, plot_path, fig_title, width, height) {
   
   # Split the cell_loc by '|', and unnest to long format
   count_cell_loc_df <- mut_df %>%
@@ -1057,4 +1072,65 @@ top5_heat_map <- function(response_df, mut_df, plot_path, fig_title) {
   
   # Return
   return(heat_map_plot)
+}
+
+# Function to extract PFAM info
+extract_family_info <- function(file_path) {
+  # Load and parse the JSON data from file
+  json_data <- fromJSON(file_path, flatten = TRUE)
+  
+  # Initialize an empty data frame for collecting FAMILY type entries
+  family_entries_df <- data.frame()
+  
+  # Check if results or matches exist and is not empty
+  if (!is.null(json_data$results) && "matches" %in% names(json_data$results)) {
+    # Get matches data
+    matches <- json_data$results$matches
+    
+    for (i in seq_along(matches)) {
+      p_id <- json_data$results$xref[[i]]$id
+      
+      # Error handling
+      if (length(p_id) > 1) {
+        p_id <- p_id[1]
+      }
+      
+      # Add p_id
+      matches[[i]] <- matches[[i]] %>% 
+        dplyr::mutate(Protein_accession = p_id) %>% 
+        dplyr::select(Protein_accession, everything())
+      
+      # Append this match to the main data frame
+      family_entries_df <- bind_rows(family_entries_df, matches[[i]])
+    }
+  }
+  
+  return(family_entries_df)
+}
+
+# Heat Map of PFAM domains using ComplexHeatmap
+complex_heatmap_pfam <- function(mut_df, plot_path, fig_title, width, height) {
+  
+  # Convert to factors
+  mut_df$corrected_hugo_symbol <- as.factor(mut_df$corrected_hugo_symbol)
+  mut_df$dom_name <- as.factor(mut_df$dom_name)
+  mut_df$source <- as.factor(mut_df$source)
+  
+  # Define the color mapping for 'source'
+  color_mapping <- c("R" = "darkgreen", "NR" = "darkred", "Shared" = "purple")
+  
+  # Create the plot
+  tile_plot <- ggplot(mut_df, aes(x = dom_name, y = corrected_hugo_symbol, fill = source)) +
+    geom_tile(color = "white") +  # Add white borders for clarity
+    scale_fill_manual(values = color_mapping) +  # Use custom colors
+    labs(x = "Domain Name", y = "HUGO Symbol", fill = "Source", title = fig_title) +
+    theme_minimal() +  # Clean minimalistic theme
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x labels for better readability
+          axis.title = element_text(size = 12, face = "bold"))  # Bold axis titles
+  
+  # Save plot
+  ggsave(plot_path, tile_plot, width = width, height = height, dpi = 300, limitsize = FALSE)
+  
+  # Return
+  return(tile_plot)
 }

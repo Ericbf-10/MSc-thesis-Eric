@@ -704,6 +704,160 @@ go2ensembl_result <- biomaRt::getBM(attributes = c("go_id",
 
 ```
 
+```{r}
+# PFAM code
+
+# DEPRECATED: TSV
+# pfam_analysis_path1 <- file.path(data_path, "../pfam_output_01.tsv")
+# pfam_analysis_path2 <- file.path(data_path, "../pfam_output_02.tsv")
+# pfam_analysis_path3 <- file.path(data_path, "../pfam_output_03.tsv")
+# pfam_analysis_path4 <- file.path(data_path, "../pfam_output_04.tsv")
+# pfam_df1 <- read.csv(pfam_analysis_path1, sep="\t", header = FALSE)
+# pfam_df2 <- read.csv(pfam_analysis_path2, sep="\t", header = FALSE)
+# pfam_df3 <- read.csv(pfam_analysis_path3, sep="\t", header = FALSE)
+# pfam_df4 <- read.csv(pfam_analysis_path4, sep="\t", header = FALSE)
+# 
+# header <- c("Protein_accession", "Sequence_MD5_digest", "Sequence_length", "Analysis", "Signature_accession", "Signature_description", "Start_location", "Stop_location", "Score", "Status", "Date", "InterPro_accession", "InterPro_description", "GO_annotations", "Pathways_annotations")
+# 
+# pfam_df <- bind_rows(pfam_df1, pfam_df2, pfam_df3, pfam_df4)
+# colnames(pfam_df) <- header
+# 
+# # Convert the Score column to numeric
+# pfam_df$Score <- as.numeric(pfam_df$Score)
+# 
+# # Filter to retain the row with the lowest Score for each unique Protein_accession
+# pfam_1_df <- pfam_df %>%
+#   dplyr::group_by(Protein_accession) %>%
+#   dplyr::slice_min(order_by = Score, with_ties = FALSE) %>%
+#   dplyr::ungroup() %>%
+#   dplyr::rename(p_ensembl_id = Protein_accession,
+#                 )
+#   dplyr::select()
+
+# DEPRECATED: XML
+
+# # Function to extract PFAM info
+# extract_family_inf <- function(file_path) {
+#   # Parse the XML file
+#   xml_data <- xmlParse(file_path)
+#   
+#   # Extract protein entries and then further navigate to the 'FAMILY' type entries
+#   proteins <- getNodeSet(xml_data, "/protein")
+#   
+#   # Prepare a list to collect all relevant data
+#   all_entries <- list()
+#   
+#   # Loop over each protein to extract FAMILY entries
+#   for (protein in proteins) {
+#     # Extract only FAMILY type entries within each protein
+#     family_entries <- getNodeSet(protein, ".//entry[@type='FAMILY']")
+#     
+#     # Extract details from each FAMILY entry
+#     entries_data <- lapply(family_entries, function(entry) {
+#       data.frame(
+#         Protein_accession = xmlValue(getNodeSet(protein, "./xref/@name")[1]),
+#         Accession = xmlGetAttr(entry, "ac"),
+#         Description = xmlGetAttr(entry, "desc"),
+#         Name = xmlGetAttr(entry, "name"),
+#         Type = xmlGetAttr(entry, "type"),
+#         stringsAsFactors = FALSE  # Avoid factors to simplify data handling
+#       )
+#     })
+#     
+#     # Combine the data from this protein into the main list
+#     all_entries <- append(all_entries, entries_data)
+#   }
+#   
+#   # Combine all collected data into a single data frame
+#   do.call(rbind, all_entries)
+# }
+# 
+# # List of file paths
+# file_paths <- c(
+#   file.path(data_path, "../mock_prot.xml"),
+#   file.path(data_path, "../pfam_output_01.xml"),
+#   file.path(data_path, "../pfam_output_02.xml"),
+#   file.path(data_path, "../pfam_output_03.xml"),
+#   file.path(data_path, "../pfam_output_04.xml")
+# )
+# 
+# # Initialize an empty list to store data frames from all files
+# all_data <- list()
+# 
+# # Process each file
+# for (file_path in file_paths) {
+#   all_data[[file_path]] <- extract_family_inf(file_path)
+# }
+# 
+# # Combine all data frames into one
+# final_df <- do.call(rbind, all_data)
+# 
+# # Optional: Convert the list of data frames into a single data frame if not already done
+# final_df <- dplyr::bind_rows(all_data)
+
+# Function to extract FAMILY (broken)
+# Function to extract PFAM info
+extract_family_info <- function(file_path) {
+  # Load and parse the JSON data from file
+  json_data <- fromJSON(file_path, flatten = TRUE)
+  
+  # Initialize an empty data frame for collecting FAMILY type entries
+  family_entries_df <- data.frame()
+  
+  # Check if results or matches exist and is not empty
+  if (!is.null(json_data$results) && "matches" %in% names(json_data$results)) {
+    # Get matches data
+    matches <- json_data$results$matches
+    
+    for (i in seq_along(matches)) {
+      p_id <- json_data$results$xref[[i]]$id
+      
+      # Error handling
+      if (length(p_id) > 1) {
+        p_id <- p_id[1]
+      }
+      
+      # Filter out entries where the entry type is "FAMILY"
+      filtered_matches <- matches[[i]][matches[[i]]$`signature.entry.type` == "FAMILY", ]
+      
+      if (!("signature.entry.type" %in% names(matches))) {
+        print(p_id)
+      }
+      
+      filtered_matches <- filtered_matches %>% 
+        dplyr::filter(`signature.entry.type` == "FAMILY")
+      
+      # If filtered_matches is not empty, process it
+      if (nrow(filtered_matches) > 0) {
+        
+        # DEBUG
+        if (length(filtered_matches$signature.entry.description) == 0) {
+          print(p_id)
+          if (filtered_matches$signature.entry.description == "Tripartite motif-containing") {
+            print(filtered_matches)
+          }
+        }
+        
+        # Extract the necessary information
+        entry_info <- filtered_matches %>%
+          dplyr::mutate(Protein_accession = p_id) %>% 
+          dplyr::select(
+            Protein_accession,
+            IPR_Accession = `signature.entry.accession`,
+            Name = `signature.entry.name`,
+            Description = `signature.entry.description`,
+            Type = `signature.entry.type`
+          )
+        # Append this entry to the main data frame
+        family_entries_df <- bind_rows(family_entries_df, entry_info)
+      }  
+    }
+  }
+  
+  return(family_entries_df)
+}
+```
+
 ## Session Info
 
 ```{r}

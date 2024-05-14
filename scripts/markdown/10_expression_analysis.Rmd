@@ -1,0 +1,274 @@
+---
+title: "Impact of dysfunctional ubiquitination in response to cancer immunotherapy"
+subtitle: <center> Somatic mutations analysis - Expression Analysis </center>
+author: "Eric Bautista Farrerons (s212514)"
+date: '`r paste("First created on May 2024. Updated on ", format(Sys.Date(), "%d %B %Y"))`'
+output:
+  html_document:
+    css: style.css
+    code_folding: hide
+    fig_caption: yes
+    toc: yes
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    toc_depth: 4
+    number_sections: true
+---
+
+# Data pre-processing
+
+This document is to analyse the Expression of the ubiquitin-related genes, immunoproteasome, HLA molecules, etc. and see if there is a pattern that distinguishes responders from non-responders.
+
+```{r, message=FALSE}
+### Load required libraries
+library(readxl)
+library(tidyverse)
+library(purrr)
+library(dplyr)
+library(knitr)
+library(DT)
+library(jsonlite)
+library(biomaRt)
+# library(HGNChelper)
+library(limma)
+
+### Load functions
+source(file = "../02_functions.R")
+
+### Define paths
+current_dir <- getwd()
+data_path <- file.path(current_dir,
+                       "../../data/_raw")
+results_pc_path <- file.path(current_dir,
+                              "../../results/patient_characteristics/output")
+results_fip_path <- file.path(current_dir,
+                              "../../results/somatic_mutation_analysis/functional_impact_prediction/output")
+results_ubgenesets_path <- file.path(current_dir, 
+                                 "../../results/somatic_mutation_analysis/ubiquitin_custom_GS/output")
+results_ubfora_path <- file.path(current_dir, 
+                                 "../../results/somatic_mutation_analysis/ubiquitin_fora/output")
+results_protein_seqs_path <- file.path(current_dir, 
+                                 "../../results/somatic_mutation_analysis/protein_seqs/output")
+results_cellular_loc_path <- file.path(current_dir, 
+                                 "../../results/somatic_mutation_analysis/cellular_loc/output")
+results_pfam_path <- file.path(current_dir, 
+                                 "../../results/somatic_mutation_analysis/pfam_analysis/output")
+
+results_expression_path <- file.path(current_dir, 
+                                 "../../results/expression_analysis/first_analysis/output")
+
+# Create the folder if it does not exist
+if(!file.exists(results_expression_path)) {
+  dir.create(results_expression_path, recursive = TRUE)
+}
+
+figures_expression_path <- file.path(current_dir, 
+                                 "../../results/expression_analysis/first_analysis/figures")
+
+# Create the folder if it does not exist
+if(!file.exists(figures_expression_path)) {
+  dir.create(figures_expression_path, recursive = TRUE)
+}
+
+### Read data & wrangle
+# Clincal metadata
+clinical_data_path <- file.path(results_pc_path,
+                           "clinical_metadata.csv")
+clinical_df <- read.csv(clinical_data_path, header = TRUE)[ , -1]
+
+# TPM matrix
+mm909_path <- file.path(data_path,
+                        "MM909_data.RData")
+load(mm909_path)
+tpm_matrix <- tpm_ensg
+
+# Get hugo_symbols
+hugo_symbols_tpm <- rownames(tpm_matrix)
+
+## Filtering out patients with missing data from rna_seq_raw and clinical_df
+tpm_matrix_columns <- names(tpm_matrix)
+
+# Subset clinical_df
+clinical_df <- clinical_df %>% 
+  dplyr::filter(Sample.ID %in% tpm_matrix_columns)
+
+# Assign row names
+rownames(clinical_df) <- clinical_df$Sample.ID
+
+# Remove Sample.ID column
+clinical_df <- clinical_df %>% 
+  dplyr::select(-Sample.ID)
+
+# Add hugo_symbols to df
+tpm_matrix <- tpm_matrix %>% 
+  dplyr::mutate(hgnc_symbol = hugo_symbols_tpm)
+```
+
+```{r, warning=FALSE, message=FALSE}
+## Convert Hugo symbols to ensembl gene id
+
+#1 Use grch37
+ensembl_ids <- SYMBOLtoENSEMBL(hugo_symbols_tpm)
+
+# Filter ensembl gene ids
+ensembl_ids_tpm <- ensembl_ids[str_detect(ensembl_ids, "^ENSG")]
+remaining_hugo <- ensembl_ids[!str_detect(ensembl_ids, "^ENSG")]
+
+#2 Use grch38 for remaining
+ensembl_ids <- SYMBOLtoENSEMBL38(remaining_hugo)
+
+# Filter ensembl gene ids
+ensembl_ids_tpm2 <- ensembl_ids[str_detect(ensembl_ids, "^ENSG")]
+remaining_hugo <- ensembl_ids[!str_detect(ensembl_ids, "^ENSG")]
+
+# (tried using biomaRt with grch37 but it couldn't map more hugo symbols to ensembl gene ids)
+
+#3 Use biomaRt with grch38
+# Connect to the GO BioMart database
+ensembl = biomaRt::useMart(biomart="ENSEMBL_MART_ENSEMBL",
+                  host="https://www.ensembl.org",
+                  path="/biomart/martservice",
+                  dataset="hsapiens_gene_ensembl")
+
+# Retrieve hugo & Ensembl gene ids
+hugo2ensembl_biomart_res <- biomaRt::getBM(attributes = c("external_gene_name",
+                                                        "ensembl_gene_id"),
+                   filters = "external_gene_name",
+                   values = remaining_hugo,
+                   mart = ensembl)
+
+# Make sure 1 to 1 mapping
+hugo2ensembl_biomart_df <- hugo2ensembl_biomart_res %>%
+  dplyr::rename(hgnc_symbol = external_gene_name) %>% 
+  dplyr::arrange(hgnc_symbol, ensembl_gene_id) %>%
+  dplyr::group_by(hgnc_symbol) %>%
+  dplyr::slice(1) %>%
+  dplyr::ungroup()
+
+#4 Merge results
+# Convert character vectors to data.frames
+df1 <- data.frame(ensembl_gene_id = ensembl_ids_tpm, 
+                  hgnc_symbol = names(ensembl_ids_tpm), 
+                  stringsAsFactors = FALSE)
+df2 <- data.frame(ensembl_gene_id = ensembl_ids_tpm2, 
+                  hgnc_symbol = names(ensembl_ids_tpm2), 
+                  stringsAsFactors = FALSE)
+
+# Combine all data.frames
+combined_df <- rbind(df1, df2, hugo2ensembl_biomart_df)
+
+# Ensure each hgnc_symbol maps to only one ensembl_gene_id
+final_ensembl_tpm <- combined_df %>%
+  dplyr::group_by(hgnc_symbol) %>%
+  dplyr::summarise(ensembl_gene_id = first(ensembl_gene_id)) %>%
+  dplyr::ungroup()
+
+# Find out missing hugo symbols & convert aliases
+remaining_hugo <- setdiff(hugo_symbols_tpm, final_ensembl_tpm$hgnc_symbol)
+corrected_remaining_hugo <- alias2SymbolTable(remaining_hugo, species = "Hs")
+
+# Convert character vector to data.frame
+df3 <- data.frame(hgnc_symbol = remaining_hugo,
+                  corrected_hugo = corrected_remaining_hugo,
+                  stringsAsFactors = FALSE)
+
+
+# Use biomaRt again
+hugo2ensembl_biomart_res <- biomaRt::getBM(attributes = c("external_gene_name",
+                                                        "ensembl_gene_id"),
+                   filters = "external_gene_name",
+                   values = df3$corrected_hugo,
+                   mart = ensembl)
+
+# Make sure 1 to 1 mapping
+hugo2ensembl_biomart_df <- hugo2ensembl_biomart_res %>%
+  dplyr::rename(corrected_hugo = external_gene_name) %>% 
+  dplyr::arrange(corrected_hugo, ensembl_gene_id) %>%
+  dplyr::group_by(corrected_hugo) %>%
+  dplyr::slice(1) %>%
+  dplyr::ungroup()
+
+# Merge original hugo symbol
+df3 <- df3 %>% 
+  dplyr::left_join(hugo2ensembl_biomart_df, by="corrected_hugo") %>% 
+  dplyr::distinct()
+
+remaining_hugo <- df3 %>% dplyr::filter(is.na(ensembl_gene_id))
+
+# Manually annotate if I can
+remaining_hugo <- remaining_hugo %>% 
+  dplyr::mutate(
+    ensembl_gene_id = case_when(
+      hgnc_symbol == "DDIT4-AS1" ~ "ENSG00000269926",
+      hgnc_symbol == "LINC01869" ~ "ENSG00000180279",
+      hgnc_symbol == "LINC02310" ~ "ENSG00000258537",
+      hgnc_symbol == "LINC02618" ~ "ENSG00000293386",
+      hgnc_symbol == "LINC02677" ~ "ENSG00000242147"
+    )
+  )
+
+# Merge
+df3 <- df3 %>% 
+  dplyr::left_join(remaining_hugo, by=c("hgnc_symbol", "corrected_hugo")) %>% 
+  dplyr::mutate(ensembl_gene_id = coalesce(ensembl_gene_id.y, ensembl_gene_id.x)) %>% # Prefer 'remaining_hugo' values
+  dplyr::select(-ensembl_gene_id.x, -ensembl_gene_id.y) %>% # Remove the temporary columns
+  dplyr::distinct()
+remaining_hugo <- df3 %>% dplyr::filter(is.na(ensembl_gene_id))
+# 6 hugo symbols remaining that are deprecated
+
+# Remove NAs
+final_df3 <- df3 %>% 
+  dplyr::filter(!is.na(ensembl_gene_id)) %>% 
+  dplyr::select(-corrected_hugo)
+
+# Merge with final df
+final_ensembl_tpm <- rbind(final_ensembl_tpm, final_df3)
+
+# Put ensembl gene id to tpm_matrix
+final_tpm_matrix <- tpm_matrix %>% 
+  dplyr::left_join(final_ensembl_tpm, by="hgnc_symbol") %>% 
+  dplyr::filter(!is.na(ensembl_gene_id))
+
+# There are duplicated ensembl gene ids, so I make them unique and then assign row names
+# Create unique row names by appending an index to duplicated IDs
+final_tpm_matrix$unique_id <- make.unique(as.character(final_tpm_matrix$ensembl_gene_id))
+
+# Set the unique identifiers as row names
+rownames(final_tpm_matrix) <- final_tpm_matrix$unique_id
+
+# Remove the 'unique_id' column since it's no longer needed
+final_tpm_matrix$unique_id <- NULL
+
+# Remove extra columns
+final_tpm_matrix <- final_tpm_matrix %>% 
+  dplyr::select(-hgnc_symbol)
+```
+
+```{r, message=FALSE, warning=FALSE}
+# Merge in a list with names = (raw, norm, fpkm, tpm, Clinical)
+input_list_expression <- list(
+  "raw" = final_tpm_matrix, 
+  "norm" = final_tpm_matrix, 
+  "fpkm" = final_tpm_matrix, 
+  "tpm" = final_tpm_matrix, 
+  "Clinical" = clinical_df)
+
+# Save into RDS file
+input_list_path <- file.path(results_expression_path, 
+                      "input_list_expression.rds")
+saveRDS(input_list_expression, file = input_list_path)
+```
+
+```{r}
+# Save TPM matrix only
+input_tpm_path <- file.path(results_expression_path, 
+                      "tpm_matrix.rds")
+saveRDS(final_tpm_matrix, file = input_tpm_path)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

@@ -874,8 +874,9 @@ joined_ub_info <- final_ub_db_df %>%
 
 # Save to file
 patients_ub_lof_mut_path <- file.path(results_ubfora_path, 
-                      "lof_patients_ub_mutations.csv")
-write.csv(joined_ub_info, file = patients_ub_lof_mut_path, row.names = TRUE)
+                      "lof_patients_ub_mutations.rds")
+saveRDS(joined_ub_info, file = patients_ub_lof_mut_path)
+mock_df <- readRDS(patients_ub_lof_mut_path)
 
 # Filter genes
 r_final_ub_db_df <- joined_ub_info %>% 
@@ -982,8 +983,8 @@ combined_df <- rbind(r_final_ub_db_df, nr_final_ub_db_df, shared_final_ub_db_df)
 
 # Save to file
 unique_shared_genes_path <- file.path(results_ubfora_path, 
-                      "unique_and_shared_genes_RvsNR.csv")
-write.csv(combined_df, file = unique_shared_genes_path, row.names = TRUE)
+                      "unique_and_shared_genes_RvsNR.rds")
+saveRDS(combined_df, file = unique_shared_genes_path)
 
 # Calculate the counts
 grouped_counts <- combined_df %>%
@@ -1017,47 +1018,50 @@ plot <- ggplot(grouped_counts, aes(x = go_parent_term, y = count, fill = source)
   scale_y_continuous(breaks = seq(0, max_count, by = 5),  # Ticks every 5 units
                      minor_breaks = seq(0, max_count, by = 1))  # Minor ticks every 1 unit
 
+plot_path <- file.path(figures_ubfora_path,
+                              "barplot_R_NR_shared_go_terms.png")
+ggsave(plot_path, plot, width = 14, height = 8, dpi = 300)
+
 # Print the plot
 print(plot)
 ```
 
 This bar plot shows unique genes in R, NR and shared. However, a gene may participate in different biological processes, and that is why the sum is not 106 (number of total ubiquitin genes in the patients), but more. I don't see that the shared genes belong to a particular category, they are quite scattered. I see that Responders have more mutated genes in all the BP they share with Non-responders, which is in accordance with the fact that they have more mutations overall. Some BP are unique to responders: chromatin organization, regulation of cell cycle, regulation of DNA-templated transcription.
 
-## Analysis of Cellular Compartment for R and NR genes with LoF (C5 - CC)
+<!-- ## Analysis of Cellular Compartment for R and NR genes with LoF (C5 - CC) -->
 
-C5 consists of gene sets derived from the Gene Ontology (GO) annotations. Here, we focus on Gene sets derived from the GO Cellular Component (CC) ontology.
+<!-- C5 consists of gene sets derived from the Gene Ontology (GO) annotations. Here, we focus on Gene sets derived from the GO Cellular Component (CC) ontology. -->
 
-```{r, message=FALSE, warning=FALSE}
-# Get all C5 CC mapped to ensembl ids
-# Left join CC to data.frames of unique R, unique NR and shared (by ensembl_id)
-# Check results (bar plot? venn diagram?)
-# Get the previous df and split into unique_R, unique_NR, shared
-# Cluster by cc, color by go cc, shape by response group.
-```
+<!-- ```{r, message=FALSE, warning=FALSE} -->
+<!-- # Get all C5 CC mapped to ensembl ids -->
+<!-- # Left join CC to data.frames of unique R, unique NR and shared (by ensembl_id) -->
+<!-- # Check results (bar plot? venn diagram?) -->
+<!-- # Get the previous df and split into unique_R, unique_NR, shared -->
+<!-- # Cluster by cc, color by go cc, shape by response group. -->
+<!-- ``` -->
 
-### Bubble plot
+<!-- ### Bubble plot -->
 
-This does not have the filter p.adjust < 0.05.
+<!-- This does not have the filter p.adjust < 0.05. -->
 
-```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=4}
-## R
-# Define output path
-mm909_ubiquitin_lof_plot_path_r_cc <- file.path(figures_ubfora_path,
-                              "ub_unique_bubble_plot_R_cc.png")
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=4} -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_lof_plot_path_r_cc <- file.path(figures_ubfora_path, -->
+<!--                               "ub_unique_bubble_plot_R_cc.png") -->
 
-mm909_ubiquitin_lof_plot_r_cc <- bubble_plot_pval(response_df, fora_results_ubiquitin_lof_df_r_cc, mm909_ubiquitin_lof_plot_path_r_cc, "FORA with Ubiquitin GS across samples (LoF mutations) for Responders", "Ubiquitin Gene Sets")
+<!-- mm909_ubiquitin_lof_plot_r_cc <- bubble_plot_pval(response_df, fora_results_ubiquitin_lof_df_r_cc, mm909_ubiquitin_lof_plot_path_r_cc, "FORA with Ubiquitin GS across samples (LoF mutations) for Responders", "Ubiquitin Gene Sets") -->
 
-print(mm909_ubiquitin_lof_plot_r_cc)
+<!-- print(mm909_ubiquitin_lof_plot_r_cc) -->
 
-## NR
-# Define output path
-mm909_ubiquitin_lof_plot_path_nr_cc <- file.path(figures_ubfora_path,
-                              "ub_unique_bubble_plot_NR_cc.png")
+<!-- ## NR -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_lof_plot_path_nr_cc <- file.path(figures_ubfora_path, -->
+<!--                               "ub_unique_bubble_plot_NR_cc.png") -->
 
-mm909_ubiquitin_lof_plot_nr_cc <- bubble_plot_pval(response_df, fora_results_ubiquitin_lof_df_nr_cc, mm909_ubiquitin_lof_plot_path_nr_cc, "FORA with Ubiquitin GS across samples (LoF mutations) for Non-responders", "Ubiquitin Gene Sets")
+<!-- mm909_ubiquitin_lof_plot_nr_cc <- bubble_plot_pval(response_df, fora_results_ubiquitin_lof_df_nr_cc, mm909_ubiquitin_lof_plot_path_nr_cc, "FORA with Ubiquitin GS across samples (LoF mutations) for Non-responders", "Ubiquitin Gene Sets") -->
 
-print(mm909_ubiquitin_lof_plot_nr_cc)
-```
+<!-- print(mm909_ubiquitin_lof_plot_nr_cc) -->
+<!-- ``` -->
 
 # Session Info
 

@@ -33,6 +33,9 @@ source(file = "../02_functions.R")
 ### Define paths
 current_dir <- getwd()
 
+data_path <- file.path(current_dir,
+                       "../../data/_raw")
+
 # Results
 results_pc_path <- file.path(current_dir,
                               "../../results/patient_characteristics/output")
@@ -51,22 +54,21 @@ if(!file.exists(figures_pc_path)) {
 }
 
 # Sup1
-sup1_data <- "../../data/_raw/41467_2017_1460_MOESM4_ESM_clinical.xlsx"
-sup1_path <- file.path(current_dir,
+sup1_data <- "41467_2017_1460_MOESM4_ESM_clinical.xlsx"
+sup1_path <- file.path(data_path,
                        sup1_data)
 
 # RData obj
-mm909_data <- "../../data/_raw/MM909_data.RData"
-mm909_path <- file.path(current_dir,
+mm909_data <- "MM909_data.RData"
+mm909_path <- file.path(data_path,
                         mm909_data)
 
 # Provean
-provean_path <- "data/provean_output/provean_output"
+provean_path <- "../../data/provean_output/provean_output"
 
 # MAF-like file
-maf_data <- "../../data/_raw/41467_2017_1460_MOESM6_ESM_somatic_mutations.xlsx"
-maf_path <- file.path(current_dir,
-                      maf_data)
+maf_path <- file.path(data_path,
+                      "41467_2017_1460_MOESM6_ESM_somatic_mutations.xlsx")
 
 ### Read data
 sup1_table <- read_excel(sup1_path,
@@ -81,20 +83,7 @@ maf_table <- read_excel(maf_path,
                         col_names = TRUE)
 
 ### Clean data
-# Subset sup1_table
-sup1_subset <- sup1_table %>%
-  dplyr::select(Sample.ID,
-                Sample.Timepoint,
-                AJCC.Stage,
-                PFS.Time,
-                PFS.Event,
-                OS.Time,
-                OS.Event,
-                Type.of.Lesion,
-                Type.of.Primary,
-                RECIST)
-
-sup1_response <- sup1_subset %>%
+sup1_response <- sup1_table %>%
   mutate(Patient.Response = case_when(
     RECIST %in% c("CR", "PR") ~ "R",
     RECIST %in% c("SD") & OS.Time >= 24 ~ "R",
@@ -110,10 +99,30 @@ sup1_final <- sup1_response %>%
     by = c("Sample.ID" = "patient")
   )
 
-# Save the sup1_final into a file
+# Subset sup1_table
+sup1_subset <- sup1_final %>%
+  dplyr::select(Sample.ID,
+                Sample.Timepoint,
+                AJCC.Stage,
+                PFS.Time,
+                PFS.Event,
+                OS.Time,
+                OS.Event,
+                Type.of.Lesion,
+                Type.of.Primary,
+                RECIST,
+                Patient.Response,
+                mut_load)
+
+# Save the sup1_subset into a file
 sup1_out_path <- file.path(results_pc_path,
                            "sup1_response.csv")
-write.csv(sup1_final, file = sup1_out_path, row.names = TRUE)
+write.csv(sup1_subset, file = sup1_out_path, row.names = TRUE)
+
+# Save the sup1_final into a file
+clinical_out_path <- file.path(results_pc_path,
+                           "clinical_metadata.csv")
+write.csv(sup1_final, file = clinical_out_path, row.names = TRUE)
 ```
 
 ## Patients' characteristics with response to treatment
@@ -333,7 +342,8 @@ p1 <- ggplot(pat_df, aes(x = reorder(sample_id, mut_load), y = mut_load, fill = 
                     labels = c("R" = "Responders", "NR" = "Non-responders")) +
   labs(x = NULL, 
        y = "Mutation Load",
-       fill = "Patient Response") +
+       fill = "Patient Response",
+       title = "Mutational load and clinical features of the cohort") +
   theme_minimal() +
   theme(axis.text.x = element_blank(), 
         axis.ticks.x = element_blank(),
