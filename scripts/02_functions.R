@@ -16,6 +16,13 @@ library(ComplexHeatmap)
 library(circlize)
 library(reshape2)
 library(gridtext)
+library(ggnewscale)
+library(patchwork)
+library(ggpubr)
+library(cowplot)
+
+# Color blind friendly palette
+cbPalette <- c("#56B4E9", "#999999", "#8A2BE2", "#E69F00", "#D55E00", "#CC79A7", "#009E73", "#F0E442", "#0072B2", "#FF69B4", "#FFD700", "#000000", "#00CED1", "#4B0082")
 
 # Set data.frame columns of type list to character
 set_lists_to_chars <- function(x) {
@@ -1108,8 +1115,8 @@ extract_family_info <- function(file_path) {
   return(family_entries_df)
 }
 
-# Heat Map of PFAM domains using ComplexHeatmap
-complex_heatmap_pfam <- function(mut_df, plot_path, fig_title, width, height) {
+# Tile plot of PFAM domains using ComplexHeatmap
+tile_plot_pfam <- function(mut_df, plot_path, fig_title, width, height) {
   
   # Convert to factors
   mut_df$corrected_hugo_symbol <- as.factor(mut_df$corrected_hugo_symbol)
@@ -1133,4 +1140,203 @@ complex_heatmap_pfam <- function(mut_df, plot_path, fig_title, width, height) {
   
   # Return
   return(tile_plot)
+}
+
+# Clustering of PFAM domains using ComplexHeatmap
+clustering_pfam <- function(mut_df, plot_path, fig_title, width, height) {
+  
+  # Convert to factors
+  mut_df$corrected_hugo_symbol <- as.factor(mut_df$corrected_hugo_symbol)
+  mut_df$dom_name <- as.factor(mut_df$dom_name)
+  mut_df$source <- as.factor(mut_df$source)
+  
+  # Convert 'source' into a numeric matrix for clustering
+  mut_df_numeric <- mut_df %>%
+    dplyr::mutate(source_numeric = as.numeric(as.factor(source))) %>%
+    dcast(corrected_hugo_symbol ~ dom_name, value.var = "source_numeric", fill = 0)
+  
+  # Perform hierarchical clustering
+  row_clusters <- hclust(dist(mut_df_numeric[,-1]), method = "ward.D2")
+  col_clusters <- hclust(dist(t(mut_df_numeric[,-1])), method = "ward.D2")
+  
+  # Reorder rows and columns based on clustering
+  mut_df <- mut_df %>%
+    dplyr::mutate(
+      corrected_hugo_symbol = factor(corrected_hugo_symbol, levels = mut_df_numeric$corrected_hugo_symbol[row_clusters$order]),
+      dom_name = factor(dom_name, levels = names(col_clusters$order))
+    )
+  
+  # Define the color mapping for 'source'
+  color_mapping <- c("R" = "darkgreen", "NR" = "darkred", "Shared" = "purple")
+  
+  # Create the plot
+  # Updated plotting function
+  tile_plot <- ggplot(mut_df, aes(x = dom_name, y = corrected_hugo_symbol, fill = source)) +
+    geom_tile(color = "white") +  # Add white borders for clarity
+    scale_fill_manual(values = color_mapping) +  # Use custom colors
+    labs(x = "Domain Name", y = "HUGO Symbol", fill = "Source", title = fig_title) +
+    theme_minimal() +  # Clean minimalistic theme
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x labels for better readability
+          axis.title = element_text(size = 12, face = "bold"))  # Bold axis titles
+  
+  # Save plot
+  ggsave(plot_path, tile_plot, width = width, height = height, dpi = 300, limitsize = FALSE)
+  
+  # Return
+  return(tile_plot)
+}
+
+# Define biomarkers clustering order
+biomarkers_clustering_order <- function(df, biomarkers, response_col = "Response", sample_col = "SampleID") {
+  # Ensure the response column is a factor
+  df <- df %>%
+    mutate(!!sym(response_col) := as.factor(!!sym(response_col)),
+           !!sym(sample_col) := as.factor(!!sym(sample_col)))
+  
+  # Calculate the median and categorize each biomarker
+  for (biomarker in biomarkers) {
+    median_value <- median(df[[biomarker]], na.rm = TRUE)
+    category_col <- paste0(biomarker, "_Category")
+    df <- df %>%
+      mutate(!!sym(category_col) := ifelse(!!sym(biomarker) >= median_value, "high", "low"))
+  }
+  
+  # Convert the categorical values to numerical for clustering
+  df_for_clustering <- df %>%
+    mutate(across(ends_with("_Category"), ~ as.numeric(. == "high")))
+  
+  # Combine the categorical numeric columns into a matrix for clustering
+  binary_matrix <- as.matrix(df_for_clustering %>%
+                               select(ends_with("_Category")))
+  
+  # Perform hierarchical clustering on the combined binary matrix
+  dist_matrix <- dist(binary_matrix)
+  clustering <- hclust(dist_matrix)
+  
+  # Get the order of SampleID based on clustering
+  sample_order <- df[[sample_col]][clustering$order]
+  
+return(list("df_biomarkers_category" = df, "sample_order" = sample_order))
+}
+
+# Function to make ecotype and tme categories plot (patchwork)
+make_ecotyper_tme_annotation_plot <- function(df, var_name, fill_label, col_start, custom_labels) {
+  plot <- ggplot(df, aes_string(x = "sample_id", y = "1", fill = var_name)) +
+    geom_tile(color = "black", linewidth = 0.5) +
+    scale_y_continuous(expand = c(0, 0), breaks = NULL) +
+    scale_fill_manual(values=cbPalette[col_start:length(cbPalette)], labels = custom_labels, na.value = "white") +
+    labs(x = NULL, y = NULL, fill = fill_label) +
+    theme_minimal() +
+    theme(axis.text.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          axis.text.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          legend.position = "right")
+  
+  return(plot)
+}
+
+# Function to make the biomarkers plot (patchwork)
+make_biomarker_annotation_plot <- function(df, var_name, fill_label, show_sample_id = FALSE) {
+  plot <- ggplot(df, aes_string(x = "sample_id", y = "1", fill = var_name)) +
+    geom_tile(color = "black", linewidth = 0.5) +
+    scale_y_continuous(expand = c(0, 0), breaks = NULL) +
+    scale_fill_manual(values = c("high" = "green", "low" = "red"),
+                      labels = c("high" = "High", "low" = "Low")) +
+    labs(x = NULL, y = NULL, fill = "Biomarker score") +
+    theme_minimal() +
+    theme(axis.text.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          axis.text.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          legend.position = ifelse(show_sample_id == TRUE, "right", "none"))
+  
+  # Conditionally add sample ID labels
+  if (show_sample_id) {
+    plot <- plot + 
+      geom_text(aes(label = "sample_id"), y = 0, vjust = 0, size = 3) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+            axis.ticks.x = element_blank())
+  }
+  
+  return(plot)
+}
+
+# Define function to generate combined plot for all biomarkers
+make_combined_biomarker_plots <- function(df, biomarkers, ecotype_plot, tme_plot) {
+  # Generate clustering order
+  result <- biomarkers_clustering_order(df, biomarkers)
+  
+  # Update the SampleID factor levels based on clustering order
+  df <- result$df_biomarkers_category %>%
+    dplyr::rename(patient_response = Response,
+                  sample_id = SampleID) %>% 
+    dplyr::mutate(sample_id = factor(sample_id, levels = result$sample_order))
+  
+  # Create the response plot
+  response_plot <- ggplot(df, aes(x = sample_id, y = "1", fill = patient_response)) +
+    geom_tile(color = "black", linewidth = 0.5) +
+    scale_fill_manual(values = c("R" = "darkgreen", "NR" = "darkred"),
+                      labels = c("R" = "Responders", "NR" = "Non-responders")) +
+    labs(x = NULL, 
+         y = NULL,
+         fill = "Patient Response",
+         title = "Cancer-Immunity Cycle biomarkers") +
+    theme_minimal() +
+    theme(axis.text.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          axis.text.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          legend.position = "right")
+  
+  # Create first label plot
+  manual_label_plots <- list()
+  manual_label_plots[[1]] <- ggdraw() + 
+    draw_label("Patient response", x = 0, hjust = 0, angle = 0, size = 12) +
+    theme(plot.margin = margin(0, 0, 0, 0, "pt"))
+  manual_label_plots[[2]] <- ggdraw() + 
+    draw_label("Ecotype category", x = 0, hjust = 0, angle = 0, size = 12) +
+    theme(plot.margin = margin(0, 0, 0, 0, "pt"))
+  manual_label_plots[[3]] <- ggdraw() + 
+    draw_label("TME category", x = 0, hjust = 0, angle = 0, size = 12) +
+    theme(plot.margin = margin(0, 0, 0, 0, "pt"))
+  
+  # Create plots for each biomarker
+  biomarker_plots <- list()
+  label_plots <- list()
+  for (i in seq_along(biomarkers)) {
+    show_sample_id <- ifelse(i == length(biomarkers), TRUE, FALSE)
+    biomarker_plots[[i]] <- make_biomarker_annotation_plot(
+      df, paste0(biomarkers[i], "_Category"), biomarkers[i], show_sample_id)
+    label_plots[[i]] <- ggdraw() + 
+      draw_label(biomarkers[i], x = 0, hjust = 0, angle = 0, size = 12) +
+      theme(plot.margin = margin(0, 0, 0, 0, "pt"))
+  }
+  
+  # Extract legends
+  legends <- list(
+    p1_legend = get_legend(response_plot),
+    p2_legend = get_legend(ecotype_plot),
+    p3_legend = get_legend(tme_plot),
+    p4_legend = get_legend(biomarker_plots[[length(biomarkers)]])
+  )
+  
+  # Combine all plots
+  combined_plot <- response_plot + theme(legend.position = "none") + manual_label_plots[[1]]
+  combined_plot <- combined_plot / (ecotype_plot + theme(legend.position = "none") + manual_label_plots[[2]])
+  combined_plot <- combined_plot / (tme_plot + theme(legend.position = "none") + manual_label_plots[[3]])
+  for (i in seq_along(biomarkers)) {
+    combined_plot <- combined_plot / (biomarker_plots[[i]] + theme(legend.position = "none") + label_plots[[i]])
+  }
+  
+  combined_legends <- (as_ggplot(legends$p1_legend)) +
+    (as_ggplot(legends$p3_legend)) +
+    (as_ggplot(legends$p2_legend)) + 
+    (as_ggplot(legends$p4_legend)) +
+    plot_layout(nrow = 1, ncol = 4)
+  
+  final_plot <- combined_plot / combined_legends +
+    plot_layout(nrow = length(biomarkers) + 5, ncol = 1, heights = c(rep(0.3, length(biomarkers) + 3), 2))
+  
+  return(final_plot)
 }

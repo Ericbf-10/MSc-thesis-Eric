@@ -164,8 +164,13 @@ I grouped some PFAM predicted domains manually because they had slightly differe
 ## R, NR and shared Heat map
 
 ```{r, message=FALSE, warning=FALSE, fig.width=20, fig.height=20}
-plot_path <- file.path(figures_pfam_path, "pfam_heat_map_R_NR_shared.png")
-complex_heatmap_pfam(combined_df, plot_path, "Heat Map of PFAM classification of ub genes", 15, 15)
+plot_path <- file.path(figures_pfam_path, "pfam_tile_R_NR_shared.png")
+tile_plot_pfam(combined_df, plot_path, "Tile plot of PFAM classification of ub genes", 15, 15)
+```
+
+```{r, message=FALSE, warning=FALSE, fig.width=20, fig.height=20}
+plot_path <- file.path(figures_pfam_path, "pfam_clustering_R_NR_shared.png")
+clustering_pfam(combined_df, plot_path, "Clustering of PFAM classification of ub genes", 15, 15)
 ```
 
 # Session Info

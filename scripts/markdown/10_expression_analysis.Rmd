@@ -33,6 +33,13 @@ library(biomaRt)
 # library(HGNChelper)
 library(limma)
 
+library(cowplot)
+library(patchwork)
+library(ggpubr)
+library(ggpubr)
+library(pheatmap)
+library(ggnewscale)
+
 ### Load functions
 source(file = "../02_functions.R")
 
@@ -94,11 +101,13 @@ clinical_df <- clinical_df %>%
   dplyr::filter(Sample.ID %in% tpm_matrix_columns)
 
 # Assign row names
-rownames(clinical_df) <- clinical_df$Sample.ID
+# rownames(clinical_df) <- clinical_df$Sample.ID
 
 # Remove Sample.ID column
 clinical_df <- clinical_df %>% 
-  dplyr::select(-Sample.ID)
+  dplyr::rename(SampleID = Sample.ID,
+                Response = Patient.Response,
+                TMB = mut_load)
 
 # Add hugo_symbols to df
 tpm_matrix <- tpm_matrix %>% 
@@ -161,7 +170,7 @@ combined_df <- rbind(df1, df2, hugo2ensembl_biomart_df)
 # Ensure each hgnc_symbol maps to only one ensembl_gene_id
 final_ensembl_tpm <- combined_df %>%
   dplyr::group_by(hgnc_symbol) %>%
-  dplyr::summarise(ensembl_gene_id = first(ensembl_gene_id)) %>%
+  dplyr::summarise(ensembl_gene_id = dplyr::first(ensembl_gene_id)) %>%
   dplyr::ungroup()
 
 # Find out missing hugo symbols & convert aliases
@@ -242,7 +251,7 @@ final_tpm_matrix$unique_id <- NULL
 
 # Remove extra columns
 final_tpm_matrix <- final_tpm_matrix %>% 
-  dplyr::select(-hgnc_symbol)
+  dplyr::select(-hgnc_symbol, -ensembl_gene_id)
 ```
 
 ```{r, message=FALSE, warning=FALSE}
@@ -251,7 +260,8 @@ input_list_expression <- list(
   "raw" = final_tpm_matrix, 
   "norm" = final_tpm_matrix, 
   "fpkm" = final_tpm_matrix, 
-  "tpm" = final_tpm_matrix, 
+  "tpm" = final_tpm_matrix,
+  "cpm" = final_tpm_matrix,
   "Clinical" = clinical_df)
 
 # Save into RDS file
@@ -265,6 +275,135 @@ saveRDS(input_list_expression, file = input_list_path)
 input_tpm_path <- file.path(results_expression_path, 
                       "tpm_matrix.rds")
 saveRDS(final_tpm_matrix, file = input_tpm_path)
+```
+
+# Output analysis (after running Aimilia's pipeline)
+
+```{r, message=FALSE, warning=FALSE, fig.width=15, fig.height=6}
+biomarkers_out <- readRDS(file.path(results_expression_path, "MM909_MEL_TPM_biomarkers.rds"))
+
+# Filter for those biomarkers that I am interested in
+biomarkers_filtered <- biomarkers_out %>% 
+  dplyr::select(SampleID, Release_of_cancer_cell_antigens_S1_TIP, Cancer_antigen_presentation_S2_TIP, APM_Senb, APMS_Thomson, IP_Kalaora, IP_score, MIAS, Priming_and_activation_S3_TIP, Trafficking_of_immune_cells_into_tumors_overall_S4_TIP, Infiltration_of_immune_cells_into_tumors_S5_TIP, Cytotoxic_cells_cTME, Dendritic_cells_cTME, B_cells_cTME, T_cells_CD8_cTME, T_cells_CD4_cTME, T_regulatory_cells_cTME, Dysfunction, Exclusion, Recognition_of_cancer_cells_by_T_cells_S6_TIP, IMRES, Killing_of_cancer_cells_S7_TIP, ImmuneCyt_Davoli, Tinflam_Ayers, Ecotype, TME, TumorPurity)
+
+# Only TIP
+biomarkers_tip <- biomarkers_out %>% 
+  dplyr::select(SampleID, Release_of_cancer_cell_antigens_S1_TIP, Cancer_antigen_presentation_S2_TIP, Priming_and_activation_S3_TIP, Trafficking_of_immune_cells_into_tumors_overall_S4_TIP, Infiltration_of_immune_cells_into_tumors_S5_TIP, Recognition_of_cancer_cells_by_T_cells_S6_TIP, Killing_of_cancer_cells_S7_TIP)
+
+# Add clinical metadata
+biomarkers_filtered <- biomarkers_filtered %>% 
+  dplyr::left_join(clinical_df, by="SampleID")
+
+biomarkers_tip <- biomarkers_tip %>% 
+  dplyr::left_join(clinical_df, by="SampleID")
+
+mock_dataset <- biomarkers_tip %>% 
+  dplyr::select(tip_cols)
+```
+
+```{r}
+# Boxplots to decide which biomarkers I keep & statistic significance (p-value)
+#STEP1: Release_of_cancer_cell_antigens_S1_TIP
+#STEP2: Cancer_antigen_presentation_S2_TIP, APM_Senb, IP_Kalaora, MIAS
+#STEP3: Priming_and_activation_S3_TIP
+#STEP4: Trafficking_of_immune_cells_into_tumors_overall_S4_TIP
+#STEP5: Infiltration_of_immune_cells_into_tumors_S5_TIP, Cytotoxic_cells_cTME, Dendritic_cells_cTME, B_cells_cTME, T_cells_CD8_cTME, T_cells_CD4_cTME, T_regulatory_cells_cTME, Dysfunction, Exclusion
+#STEP6: Recognition_of_cancer_cells_by_T_cells_S6_TIP, IMRES
+#STEP7: Killing_of_cancer_cells_S7_TIP, ImmuneCyt_Davoli, Tinflam_Ayers, Ecotype, TME
+
+biomarker = "TumorPurity"
+
+reduced_df <- biomarkers_filtered %>% 
+  dplyr::select(SampleID, Response, Killing_of_cancer_cells_S7_TIP, ImmuneCyt_Davoli, Tinflam_Ayers, Ecotype, TME, TumorPurity) %>% 
+  dplyr::mutate(Response = as.factor(Response))
+
+long_data <- reduced_df %>%
+    pivot_longer(cols = c(biomarker), 
+                 names_to = "Measurement", values_to = "Value")
+
+# Create the boxplot with ggplot2
+p <- ggplot(long_data, aes(x = Measurement, y = Value, fill = Response)) +
+    geom_boxplot() +
+    scale_fill_manual(values = c("R" = "blue", "NR" = "red")) +
+    labs(x = "Measurement", y = "Value", title = "Boxplot of Measurements Faceted by Response") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Add p-values to the plot
+p + stat_compare_means(aes(group = Response), method = "t.test", label = "p.signif")
+```
+
+```{r}
+# Categorical biomarkers
+
+# Convert Response, Tinflam_Ayers, and Ecotype to factors if they are not already
+reduced_df <- biomarkers_filtered %>% 
+  dplyr::select(SampleID, Response, Killing_of_cancer_cells_S7_TIP, ImmuneCyt_Davoli, Tinflam_Ayers, Ecotype, TME, TumorPurity) %>% 
+  dplyr::mutate(Response = as.factor(Response),
+           Tinflam_Ayers = as.factor(TME),
+           Ecotype = as.factor(Ecotype))
+
+# Plot the counts for Tinflam_Ayers faceted by Response
+p1 <- ggplot(reduced_df, aes(x = TME, fill = Response)) +
+    geom_bar(position = "dodge") +
+    scale_fill_manual(values = c("R" = "blue", "NR" = "red")) +
+    labs(x = "Tinflam_Ayers", y = "Count", title = "Count of Tinflam_Ayers by Response") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot the counts for Ecotype faceted by Response
+p2 <- ggplot(reduced_df, aes(x = Ecotype, fill = Response)) +
+    geom_bar(position = "dodge") +
+    scale_fill_manual(values = c("R" = "blue", "NR" = "red")) +
+    labs(x = "Ecotype", y = "Count", title = "Count of Ecotype by Response") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Print the plots
+p1
+p2
+```
+
+```{r, fig.height=14, fig.width=10}
+# Assuming biomarkers_filtered is the data frame and contains the relevant columns
+biomarkers <- c("Release_of_cancer_cell_antigens_S1_TIP", "Cancer_antigen_presentation_S2_TIP", "APM_Senb", "APMS_Thomson", "IP_Kalaora", "IP_score", "MIAS", "Priming_and_activation_S3_TIP", "Trafficking_of_immune_cells_into_tumors_overall_S4_TIP", "Infiltration_of_immune_cells_into_tumors_S5_TIP", "Cytotoxic_cells_cTME", "Dendritic_cells_cTME", "B_cells_cTME", "T_cells_CD8_cTME", "T_cells_CD4_cTME", "T_regulatory_cells_cTME", "Dysfunction", "Exclusion", "Recognition_of_cancer_cells_by_T_cells_S6_TIP", "IMRES", "Killing_of_cancer_cells_S7_TIP", "ImmuneCyt_Davoli", "Tinflam_Ayers")
+
+result <- biomarkers_clustering_order(biomarkers_filtered, biomarkers)
+
+# Update the SampleID factor levels based on clustering order
+biomarkers_df <- result$df_biomarkers_category %>%
+  dplyr::rename(patient_response = Response,
+                sample_id = SampleID) %>% 
+  dplyr::mutate(sample_id = factor(sample_id, levels = result$sample_order))
+
+p1 <- ggplot(biomarkers_df, aes_string(x = "sample_id", y = "1", fill = "patient_response")) +
+  geom_tile(color = "black", linewidth = 0.5) +
+  scale_y_continuous(expand = c(0, 0), breaks = NULL) +
+  scale_fill_manual(values = c("R" = "blue", "NR" = "yellow"),
+                    labels = c("R" = "Responders", "NR" = "Non-responders")) +
+  labs(x = NULL, 
+       y = NULL,
+       fill = "Patient Response",
+       title = "Cancer-Immunity Cycle biomarkers") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "right")
+
+# TODO: Add the EMT and Ecotyper with legends
+ecotype_plot <- make_ecotyper_tme_annotation_plot(biomarkers_df, "Ecotype", "Ecotype category", 1, c("CE1" = "CE1", "CE2" = "CE2", "CE3" = "CE3", "CE4" = "CE4", "CE5" = "CE5", "CE6" = "CE6", "CE7" = "CE7", "CE8" = "CE8", "CE9" = "CE9", "CE10" = "CE10", "NA" = "NA"))
+tme_plot <- make_ecotyper_tme_annotation_plot(biomarkers_df, "TME", "TME category", 11, c("D" = "Desert", "F" = "Fibrotic", "IE" = "Immune-Enriched Non-Fibrotic", "IE/F" = "Immune-Enriched Fibrotic"))
+
+# Create the final plot
+final_plot <- make_combined_biomarker_plots(biomarkers_filtered, biomarkers, ecotype_plot, tme_plot)
+  
+# Save and print the plot
+plot_path <- file.path(figures_expression_path, 
+                      "cancer_immunity_cycle_biomarkers.png")
+ggsave(plot_path, final_plot, width = 10, height = 14, dpi = 300)
+print(final_plot)
 ```
 
 # Session Info
