@@ -1197,8 +1197,13 @@ biomarkers_clustering_order <- function(df, biomarkers, response_col = "Response
   for (biomarker in biomarkers) {
     median_value <- median(df[[biomarker]], na.rm = TRUE)
     category_col <- paste0(biomarker, "_Category")
-    df <- df %>%
-      mutate(!!sym(category_col) := ifelse(!!sym(biomarker) >= median_value, "high", "low"))
+    if (biomarker %in% c("Exclusion", "Dysfunction")) {
+      df <- df %>%
+        dplyr::mutate(!!sym(category_col) := ifelse(!!sym(biomarker) >= median_value, "low", "high"))
+    } else {
+      df <- df %>%
+        dplyr::mutate(!!sym(category_col) := ifelse(!!sym(biomarker) >= median_value, "high", "low")) 
+    }
   }
   
   # Convert the categorical values to numerical for clustering

@@ -366,7 +366,7 @@ p2
 
 ```{r, fig.height=14, fig.width=10}
 # Assuming biomarkers_filtered is the data frame and contains the relevant columns
-biomarkers <- c("Release_of_cancer_cell_antigens_S1_TIP", "Cancer_antigen_presentation_S2_TIP", "APM_Senb", "APMS_Thomson", "IP_Kalaora", "IP_score", "MIAS", "Priming_and_activation_S3_TIP", "Trafficking_of_immune_cells_into_tumors_overall_S4_TIP", "Infiltration_of_immune_cells_into_tumors_S5_TIP", "Cytotoxic_cells_cTME", "Dendritic_cells_cTME", "B_cells_cTME", "T_cells_CD8_cTME", "T_cells_CD4_cTME", "T_regulatory_cells_cTME", "Dysfunction", "Exclusion", "Recognition_of_cancer_cells_by_T_cells_S6_TIP", "IMRES", "Killing_of_cancer_cells_S7_TIP", "ImmuneCyt_Davoli", "Tinflam_Ayers")
+biomarkers <- c("TMB", "Release_of_cancer_cell_antigens_S1_TIP", "Cancer_antigen_presentation_S2_TIP", "APM_Senb", "APMS_Thomson", "IP_Kalaora", "IP_score", "MIAS", "Priming_and_activation_S3_TIP", "Trafficking_of_immune_cells_into_tumors_overall_S4_TIP", "Infiltration_of_immune_cells_into_tumors_S5_TIP", "Cytotoxic_cells_cTME", "Dendritic_cells_cTME", "B_cells_cTME", "T_cells_CD8_cTME", "T_cells_CD4_cTME", "T_regulatory_cells_cTME", "Dysfunction", "Exclusion", "Recognition_of_cancer_cells_by_T_cells_S6_TIP", "IMRES", "Killing_of_cancer_cells_S7_TIP", "ImmuneCyt_Davoli", "Tinflam_Ayers")
 
 result <- biomarkers_clustering_order(biomarkers_filtered, biomarkers)
 
