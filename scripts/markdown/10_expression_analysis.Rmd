@@ -30,10 +30,13 @@ library(knitr)
 library(DT)
 library(jsonlite)
 library(biomaRt)
-# library(HGNChelper)
 library(limma)
+library(DT)
 
+library(corrplot)
 library(cowplot)
+library(dendextend)
+library(ggdendro)
 library(patchwork)
 library(ggpubr)
 library(ggpubr)
@@ -84,6 +87,11 @@ clinical_data_path <- file.path(results_pc_path,
                            "clinical_metadata.csv")
 clinical_df <- read.csv(clinical_data_path, header = TRUE)[ , -1]
 
+# Save into RDS file
+clinical_metadata_path <- file.path(results_expression_path, 
+                      "clinical_metadata.rds")
+saveRDS(clinical_df, file = clinical_metadata_path)
+
 # TPM matrix
 mm909_path <- file.path(data_path,
                         "MM909_data.RData")
@@ -103,7 +111,7 @@ clinical_df <- clinical_df %>%
 # Assign row names
 # rownames(clinical_df) <- clinical_df$Sample.ID
 
-# Remove Sample.ID column
+# Rename Sample.ID column
 clinical_df <- clinical_df %>% 
   dplyr::rename(SampleID = Sample.ID,
                 Response = Patient.Response,
@@ -239,67 +247,221 @@ final_tpm_matrix <- tpm_matrix %>%
   dplyr::left_join(final_ensembl_tpm, by="hgnc_symbol") %>% 
   dplyr::filter(!is.na(ensembl_gene_id))
 
-# There are duplicated ensembl gene ids, so I make them unique and then assign row names
-# Create unique row names by appending an index to duplicated IDs
-final_tpm_matrix$unique_id <- make.unique(as.character(final_tpm_matrix$ensembl_gene_id))
+genes <- final_tpm_matrix$ensembl_gene_id
+tpm_matrix <- final_tpm_matrix %>% 
+  dplyr::select(-hgnc_symbol, -ensembl_gene_id) %>% 
+  as.matrix()
 
-# Set the unique identifiers as row names
-rownames(final_tpm_matrix) <- final_tpm_matrix$unique_id
+rownames(tpm_matrix) <- genes
+tpm_matrix_def <- removeDuplicateGenesDF(tpm_matrix)
 
-# Remove the 'unique_id' column since it's no longer needed
-final_tpm_matrix$unique_id <- NULL
-
-# Remove extra columns
-final_tpm_matrix <- final_tpm_matrix %>% 
-  dplyr::select(-hgnc_symbol, -ensembl_gene_id)
+# # Set the unique identifiers as row names
+# rownames(final_tpm_matrix) <- final_tpm_matrix$unique_id
+# 
+# # Remove the 'unique_id' column since it's no longer needed
+# final_tpm_matrix$unique_id <- NULL
+# 
+# # Remove extra columns
+# final_tpm_matrix <- final_tpm_matrix %>% 
+#   dplyr::select(-hgnc_symbol, -ensembl_gene_id)
 ```
 
 ```{r, message=FALSE, warning=FALSE}
 # Merge in a list with names = (raw, norm, fpkm, tpm, Clinical)
 input_list_expression <- list(
-  "raw" = final_tpm_matrix, 
-  "norm" = final_tpm_matrix, 
-  "fpkm" = final_tpm_matrix, 
-  "tpm" = final_tpm_matrix,
-  "cpm" = final_tpm_matrix,
+  "raw" = tpm_matrix_def, 
+  "norm" = tpm_matrix_def, 
+  "fpkm" = tpm_matrix_def, 
+  "tpm" = tpm_matrix_def,
+  "cpm" = tpm_matrix_def,
   "Clinical" = clinical_df)
 
 # Save into RDS file
 input_list_path <- file.path(results_expression_path, 
                       "input_list_expression.rds")
 saveRDS(input_list_expression, file = input_list_path)
-```
 
-```{r}
 # Save TPM matrix only
 input_tpm_path <- file.path(results_expression_path, 
                       "tpm_matrix.rds")
-saveRDS(final_tpm_matrix, file = input_tpm_path)
+saveRDS(tpm_matrix_def, file = input_tpm_path)
 ```
 
-# Output analysis (after running Aimilia's pipeline)
+# Merge output of expression analysis with clinical and ubiquitin data (after running Aimilia's pipeline)
 
-```{r, message=FALSE, warning=FALSE, fig.width=15, fig.height=6}
+```{r, message=FALSE, warning=FALSE}
 biomarkers_out <- readRDS(file.path(results_expression_path, "MM909_MEL_TPM_biomarkers.rds"))
 
-# Filter for those biomarkers that I am interested in
-biomarkers_filtered <- biomarkers_out %>% 
-  dplyr::select(SampleID, Release_of_cancer_cell_antigens_S1_TIP, Cancer_antigen_presentation_S2_TIP, APM_Senb, APMS_Thomson, IP_Kalaora, IP_score, MIAS, Priming_and_activation_S3_TIP, Trafficking_of_immune_cells_into_tumors_overall_S4_TIP, Infiltration_of_immune_cells_into_tumors_S5_TIP, Cytotoxic_cells_cTME, Dendritic_cells_cTME, B_cells_cTME, T_cells_CD8_cTME, T_cells_CD4_cTME, T_regulatory_cells_cTME, Dysfunction, Exclusion, Recognition_of_cancer_cells_by_T_cells_S6_TIP, IMRES, Killing_of_cancer_cells_S7_TIP, ImmuneCyt_Davoli, Tinflam_Ayers, Ecotype, TME, TumorPurity)
+# Add clinical metadata & new response categories
+biomarkers_clinical <- biomarkers_out %>% 
+  dplyr::left_join(clinical_df, by="SampleID") %>% 
+  dplyr::mutate(resp_3_cat = case_when(
+    RECIST %in% c("CR", "PR") ~ "R", 
+    RECIST %in% c("SD") ~ "SD", 
+    RECIST %in% c("PD") ~ "NR", 
+    TRUE ~ NA_character_
+    ))
 
-# Only TIP
-biomarkers_tip <- biomarkers_out %>% 
-  dplyr::select(SampleID, Release_of_cancer_cell_antigens_S1_TIP, Cancer_antigen_presentation_S2_TIP, Priming_and_activation_S3_TIP, Trafficking_of_immune_cells_into_tumors_overall_S4_TIP, Infiltration_of_immune_cells_into_tumors_S5_TIP, Recognition_of_cancer_cells_by_T_cells_S6_TIP, Killing_of_cancer_cells_S7_TIP)
+# Process ubi info and merge
+annot_lof_ub_path <- file.path(results_ubfora_path, 
+                      "annot_lof_ub.rds")
+annot_lof_ub_df <- readRDS(annot_lof_ub_path)
 
-# Add clinical metadata
-biomarkers_filtered <- biomarkers_filtered %>% 
-  dplyr::left_join(clinical_df, by="SampleID")
+cat_lof_ub_df <- annot_lof_ub_df %>% 
+  dplyr::mutate(ub_category = case_when(
+    category %in% c("E1_genes", "E2_genes", "E3_genes") ~ "ubiquitination",
+    category %in% c("C19_genes", "dub_genes") ~ "deubiquitination",
+    TRUE ~ NA_character_
+  ))
 
-biomarkers_tip <- biomarkers_tip %>% 
-  dplyr::left_join(clinical_df, by="SampleID")
+# Save RDS
+cat_lof_ub_path <- file.path(results_expression_path, 
+                      "cat_lof_ub.rds")
+saveRDS(cat_lof_ub_df, file = cat_lof_ub_path)
 
-mock_dataset <- biomarkers_tip %>% 
-  dplyr::select(tip_cols)
+reduced_cat_lof_ub_df <- cat_lof_ub_df %>% 
+  dplyr::select(sample_id, ub_category) %>% 
+  dplyr::group_by(sample_id) %>%
+  dplyr::summarise(
+    ubi_lof = as.integer(any(ub_category == "ubiquitination")),
+    deubi_lof = as.integer(any(ub_category == "deubiquitination"))
+  )
+
+# Add ubiquitin lof info
+biomarkers_clinical_ubi <- biomarkers_clinical %>% 
+  dplyr::left_join(reduced_cat_lof_ub_df, by=c("SampleID" = "sample_id")) %>% 
+  tidyr::replace_na(list(ubi_lof = 0, deubi_lof = 0))
 ```
+
+<!-- ## Process ubi and merge -->
+
+<!-- ```{r} -->
+<!-- ## TODO: improve the code below -->
+
+<!-- # Pre-process ubi data.frame -->
+<!-- patients_ub_lof_mut_path <- file.path(results_ubfora_path,  -->
+<!--                       "lof_patients_ub_mutations.rds") -->
+<!-- ub_df <- readRDS(patients_ub_lof_mut_path) -->
+
+<!-- category_ub_df <- ub_df %>%  -->
+<!--   dplyr::select(sample_id, patient_response, category_db) %>%  -->
+<!--   dplyr::distinct() -->
+
+<!-- # Step 1: Remove all rows with "ubiquitin_other" in category_db -->
+<!-- filtered_df <- category_ub_df %>% -->
+<!--   filter(category_db != "ubiquitin_other") -->
+
+<!-- # Step 2: Identify sample_id values that had only "ubiquitin_other" -->
+<!-- ubiquitin_only_samples <- category_ub_df %>% -->
+<!--   filter(category_db == "ubiquitin_other") %>% -->
+<!--   anti_join(filtered_df, by = "sample_id") %>% -->
+<!--   select(sample_id, patient_response) %>% -->
+<!--   distinct() -->
+
+<!-- # Step 3: Add rows with NA in category_db for these sample_id values -->
+<!-- additional_rows <- ubiquitin_only_samples %>% -->
+<!--   mutate(category_db = NA) -->
+
+<!-- # Combine the filtered data frame with the additional rows -->
+<!-- final_df <- bind_rows(filtered_df, additional_rows) -->
+
+<!-- # Step 4: Identify sample_id values in biomarkers_df not in final_df -->
+<!-- missing_samples <- biomarkers_clinical_filtered %>% -->
+<!--   dplyr::select(sample_id, patient_response) %>%  -->
+<!--   anti_join(final_df, by = "sample_id") %>% -->
+<!--   dplyr::mutate(category_db = NA) -->
+
+<!-- # Step 5: Add missing sample_id rows to final_df -->
+<!-- category_ub_df <- bind_rows(final_df, missing_samples) -->
+
+<!-- # Step 6: Define categories -->
+<!-- category_ub_df <- category_ub_df %>%  -->
+<!--   dplyr::mutate( -->
+<!--     Ubi_Category = ifelse(category_db == "ubiquitination", 1, 0), -->
+<!--     Deubi_Category = ifelse(category_db == "deubiquitination", 1, 0) -->
+<!--   ) -->
+
+<!-- # Group by sample_id and summarize to combine rows, prioritizing "1" -->
+<!-- category_ub_df <- category_ub_df %>% -->
+<!--   group_by(sample_id, patient_response) %>% -->
+<!--   summarise( -->
+<!--     Ubi_Category = ifelse(sum(Ubi_Category) > 0, "1", "0"), -->
+<!--     Deubi_Category = ifelse(sum(Deubi_Category) > 0, "1", "0"), -->
+<!--     .groups = 'drop' -->
+<!--   ) -->
+
+<!-- # Filter out rows with sample_id not in sample_order -->
+<!-- final_category_ub_df <- category_ub_df %>% -->
+<!--   dplyr::filter(sample_id %in% result$sample_order) -->
+
+<!-- # Replace NA values with "0" -->
+<!-- final_category_ub_df$Ubi_Category[is.na(final_category_ub_df$Ubi_Category)] <- "0" -->
+<!-- final_category_ub_df$Deubi_Category[is.na(final_category_ub_df$Deubi_Category)] <- "0" -->
+
+<!-- # Convert sample_id to factor with the correct levels -->
+<!-- final_category_ub_df <- final_category_ub_df %>% -->
+<!--   mutate(sample_id = factor(sample_id, levels = result$sample_order)) -->
+<!-- ``` -->
+
+## Full output table
+
+```{r}
+# Datatable of output
+datatable(biomarkers_clinical_ubi, 
+          extensions = c('Buttons', 
+                         'FixedColumns'), 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=8,
+            fixedColumns = list(leftColumns = 2), # Freeze the first 2 columns
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Expression analysis of Cancer Immunity Cycle biomarkers merged with clinical metadata and LoF ubi mutations."
+        )
+```
+
+<!-- ## Filtered biomarkers table -->
+
+<!-- ```{r} -->
+<!-- # Filter for those biomarkers that I am interested in -->
+<!-- biomarkers_filtered <- biomarkers_out %>%  -->
+<!--   dplyr::select(SampleID, Release_of_cancer_cell_antigens_S1_TIP, Cancer_antigen_presentation_S2_TIP, APM_Senb, APMS_Thomson, IP_Kalaora, IP_score, MIAS, Priming_and_activation_S3_TIP, Trafficking_of_immune_cells_into_tumors_overall_S4_TIP, Infiltration_of_immune_cells_into_tumors_S5_TIP, Cytotoxic_cells_cTME, Dendritic_cells_cTME, B_cells_cTME, T_cells_CD8_cTME, T_cells_CD4_cTME, T_regulatory_cells_cTME, Dysfunction, Exclusion, Recognition_of_cancer_cells_by_T_cells_S6_TIP, IMRES, Killing_of_cancer_cells_S7_TIP, ImmuneCyt_Davoli, Tinflam_Ayers, Ecotype, TME, TumorPurity) -->
+
+<!-- # Datatable of output -->
+<!-- datatable(biomarkers_filtered,  -->
+<!--           extensions = c('Buttons',  -->
+<!--                          'FixedColumns'),  -->
+<!--           options = list( -->
+<!--             dom = 'Bfrtip', -->
+<!--             buttons = c('copy', 'excel', 'csv'), -->
+<!--             scrollX=TRUE, -->
+<!--             pageLength=8, -->
+<!--             fixedColumns = list(leftColumns = 2), # Freeze the first 2 columns -->
+<!--             columnDefs = list(list( -->
+<!--               targets = "_all", -->
+<!--               render = JS( -->
+<!--                 "function(data, type, row, meta) {", -->
+<!--                 "  return data === null ? 'NA' : data;", -->
+<!--                 "}" -->
+<!--               ) -->
+<!--             )) -->
+<!--           ), -->
+<!--           caption = "Expression analysis of Cancer Immunity Cycle biomarkers (filtered)." -->
+<!--         ) -->
+<!-- ``` -->
+
+# Boxplots
+
+## 2 categories (R, NR)
 
 ```{r}
 # Boxplots to decide which biomarkers I keep & statistic significance (p-value)
@@ -311,50 +473,92 @@ mock_dataset <- biomarkers_tip %>%
 #STEP6: Recognition_of_cancer_cells_by_T_cells_S6_TIP, IMRES
 #STEP7: Killing_of_cancer_cells_S7_TIP, ImmuneCyt_Davoli, Tinflam_Ayers, Ecotype, TME
 
-biomarker = "TumorPurity"
+biomarkers_numeric_df <- biomarkers_clinical_ubi %>% 
+  dplyr::select(SampleID, Response, resp_3_cat, Release_of_cancer_cell_antigens_S1_TIP, Cancer_antigen_presentation_S2_TIP, APM_Senb, IP_Kalaora, MIAS, Priming_and_activation_S3_TIP, Trafficking_of_immune_cells_into_tumors_overall_S4_TIP, Infiltration_of_immune_cells_into_tumors_S5_TIP, Cytotoxic_cells_cTME, Dendritic_cells_cTME, B_cells_cTME, T_cells_CD8_cTME, T_cells_CD4_cTME, T_regulatory_cells_cTME, Dysfunction, Exclusion, Recognition_of_cancer_cells_by_T_cells_S6_TIP, IMRES, Killing_of_cancer_cells_S7_TIP, ImmuneCyt_Davoli, Tinflam_Ayers, TumorPurity, ubi_lof, deubi_lof)
+biomarkers_numeric_vec <- colnames(biomarkers_numeric_df)[-c(1, 2, 3)]
 
-reduced_df <- biomarkers_filtered %>% 
-  dplyr::select(SampleID, Response, Killing_of_cancer_cells_S7_TIP, ImmuneCyt_Davoli, Tinflam_Ayers, Ecotype, TME, TumorPurity) %>% 
-  dplyr::mutate(Response = as.factor(Response))
+# Loop through the biomarkers and generate a boxplot for each
+plots <- list()
+for (biomarker in biomarkers_numeric_vec) {
+  p <- create_biomarker_boxplot(biomarkers_numeric_df, biomarker)
+  plots[[biomarker]] <- p
+}
 
-long_data <- reduced_df %>%
-    pivot_longer(cols = c(biomarker), 
-                 names_to = "Measurement", values_to = "Value")
-
-# Create the boxplot with ggplot2
-p <- ggplot(long_data, aes(x = Measurement, y = Value, fill = Response)) +
-    geom_boxplot() +
-    scale_fill_manual(values = c("R" = "blue", "NR" = "red")) +
-    labs(x = "Measurement", y = "Value", title = "Boxplot of Measurements Faceted by Response") +
-    theme_minimal() +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-# Add p-values to the plot
-p + stat_compare_means(aes(group = Response), method = "t.test", label = "p.signif")
+# Print the plots
+for (biomarker in biomarkers_numeric_vec) {
+  print(plots[[biomarker]])
+}
 ```
 
 ```{r}
-# Categorical biomarkers
+# Loop through the biomarkers and generate a boxplot for each
+plots <- list()
+for (biomarker in biomarkers_numeric_vec) {
+  p <- create_biomarker_boxplot(biomarkers_numeric_df, biomarker, response_col = "resp_3_cat", fill_colors = c("R" = "#0072B2", "SD" = "#D55E00", "NR" = "#F0E442"))
+  plots[[biomarker]] <- p
+}
 
-# Convert Response, Tinflam_Ayers, and Ecotype to factors if they are not already
-reduced_df <- biomarkers_filtered %>% 
-  dplyr::select(SampleID, Response, Killing_of_cancer_cells_S7_TIP, ImmuneCyt_Davoli, Tinflam_Ayers, Ecotype, TME, TumorPurity) %>% 
+# Print the plots
+for (biomarker in biomarkers_numeric_vec) {
+  print(plots[[biomarker]])
+}
+```
+
+## Compute correlation matrix
+
+```{r, fig.height=10, fig.width=10}
+# Filter
+df2cor <- biomarkers_numeric_df %>% 
+  dplyr::select(-SampleID, -Response, -resp_3_cat)
+
+# Compute the correlation matrix
+cor_matrix <- cor(df2cor, use = "pairwise.complete.obs", method = "pearson")
+
+# Convert correlation matrix to long format
+cor_long <- as.data.frame(as.table(cor_matrix))
+
+# Filter pairs with high correlation (e.g., |correlation| > 0.8 and not comparing the same biomarker)
+high_cor_pairs <- cor_long %>%
+  filter(Var1 != Var2, abs(Freq) > 0.8) %>%
+  arrange(desc(abs(Freq)))
+
+# Print highly correlated pairs
+print(high_cor_pairs)
+
+# Open a new plotting window
+plot.new()
+dev.off()
+
+# Visualize the correlation matrix with reduced text size
+png(file.path(figures_expression_path, "biomarkers_correlation.png"), width = 1000, height = 800)
+corrplot(cor_matrix, method = "color", type = "upper", order = "hclust", 
+         tl.col = "black", tl.srt = 45, addCoef.col = "black", number.cex = 0.65, tl.cex = 0.8)
+dev.off()
+```
+
+# Categorical biomarkers by response
+
+```{r}
+# Categorical biomarkers
+biomarkers_categorical_df <- biomarkers_clinical_ubi %>% 
+  dplyr::select(SampleID, Response, Ecotype, TME) %>% 
   dplyr::mutate(Response = as.factor(Response),
            Tinflam_Ayers = as.factor(TME),
            Ecotype = as.factor(Ecotype))
+biomarkers_categorical_vec <- colnames(biomarkers_categorical_df)[-c(1,2)]
 
 # Plot the counts for Tinflam_Ayers faceted by Response
-p1 <- ggplot(reduced_df, aes(x = TME, fill = Response)) +
+p1 <- ggplot(biomarkers_categorical_df, aes(x = TME, fill = Response)) +
     geom_bar(position = "dodge") +
-    scale_fill_manual(values = c("R" = "blue", "NR" = "red")) +
-    labs(x = "Tinflam_Ayers", y = "Count", title = "Count of Tinflam_Ayers by Response") +
+    scale_fill_manual(values = c("R" = "#0072B2", "NR" = "#F0E442")) +
+    labs(x = "Tinflam_Ayers", y = "Count", title = "Count of TME by Response") +
     theme_minimal() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 # Plot the counts for Ecotype faceted by Response
-p2 <- ggplot(reduced_df, aes(x = Ecotype, fill = Response)) +
+p2 <- ggplot(biomarkers_categorical_df, aes(x = Ecotype, fill = Response)) +
     geom_bar(position = "dodge") +
-    scale_fill_manual(values = c("R" = "blue", "NR" = "red")) +
+    scale_fill_manual(values = c("R" = "#0072B2", "NR" = "#F0E442")) +
     labs(x = "Ecotype", y = "Count", title = "Count of Ecotype by Response") +
     theme_minimal() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
@@ -364,11 +568,45 @@ p1
 p2
 ```
 
-```{r, fig.height=14, fig.width=10}
-# Assuming biomarkers_filtered is the data frame and contains the relevant columns
-biomarkers <- c("TMB", "Release_of_cancer_cell_antigens_S1_TIP", "Cancer_antigen_presentation_S2_TIP", "APM_Senb", "APMS_Thomson", "IP_Kalaora", "IP_score", "MIAS", "Priming_and_activation_S3_TIP", "Trafficking_of_immune_cells_into_tumors_overall_S4_TIP", "Infiltration_of_immune_cells_into_tumors_S5_TIP", "Cytotoxic_cells_cTME", "Dendritic_cells_cTME", "B_cells_cTME", "T_cells_CD8_cTME", "T_cells_CD4_cTME", "T_regulatory_cells_cTME", "Dysfunction", "Exclusion", "Recognition_of_cancer_cells_by_T_cells_S6_TIP", "IMRES", "Killing_of_cancer_cells_S7_TIP", "ImmuneCyt_Davoli", "Tinflam_Ayers")
+```{r}
+# Categorical biomarkers
+biomarkers_categorical_df <- biomarkers_clinical_ubi %>% 
+  dplyr::select(SampleID, resp_3_cat, Ecotype, TME) %>% 
+  dplyr::mutate(Response = as.factor(resp_3_cat),
+           Tinflam_Ayers = as.factor(TME),
+           Ecotype = as.factor(Ecotype))
+biomarkers_categorical_vec <- colnames(biomarkers_categorical_df)[-c(1,2)]
 
-result <- biomarkers_clustering_order(biomarkers_filtered, biomarkers)
+# Plot the counts for Tinflam_Ayers faceted by Response
+p1 <- ggplot(biomarkers_categorical_df, aes(x = TME, fill = resp_3_cat)) +
+    geom_bar(position = "dodge") +
+    scale_fill_manual(values = c("R" = "#0072B2", "SD" = "#D55E00", "NR" = "#F0E442")) +
+    labs(x = "Tinflam_Ayers", y = "Count", title = "Count of TME by Response") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot the counts for Ecotype faceted by Response
+p2 <- ggplot(biomarkers_categorical_df, aes(x = Ecotype, fill = resp_3_cat)) +
+    geom_bar(position = "dodge") +
+    scale_fill_manual(values = c("R" = "#0072B2", "SD" = "#D55E00", "NR" = "#F0E442")) +
+    labs(x = "Ecotype", y = "Count", title = "Count of Ecotype by Response") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Print the plots
+p1
+p2
+```
+
+# Tile plot of biomarkers
+
+## Using median
+
+```{r}
+# Pre-process biomarkers data.frame
+biomarkers <- c("TMB", "Release_of_cancer_cell_antigens_S1_TIP", "Cancer_antigen_presentation_S2_TIP", "APM_Senb", "IP_Kalaora", "MIAS", "Priming_and_activation_S3_TIP", "Trafficking_of_immune_cells_into_tumors_overall_S4_TIP", "Infiltration_of_immune_cells_into_tumors_S5_TIP", "Cytotoxic_cells_cTME", "Dendritic_cells_cTME", "B_cells_cTME", "T_cells_CD8_cTME", "T_cells_CD4_cTME", "T_regulatory_cells_cTME", "Dysfunction", "Exclusion", "Recognition_of_cancer_cells_by_T_cells_S6_TIP", "IMRES", "Killing_of_cancer_cells_S7_TIP", "ImmuneCyt_Davoli", "Tinflam_Ayers") # Removed "dup": APMS_Thomson, IP_score
+
+result <- biomarkers_clustering_order(biomarkers_clinical_ubi, biomarkers, "median")
 
 # Update the SampleID factor levels based on clustering order
 biomarkers_df <- result$df_biomarkers_category %>%
@@ -376,34 +614,612 @@ biomarkers_df <- result$df_biomarkers_category %>%
                 sample_id = SampleID) %>% 
   dplyr::mutate(sample_id = factor(sample_id, levels = result$sample_order))
 
-p1 <- ggplot(biomarkers_df, aes_string(x = "sample_id", y = "1", fill = "patient_response")) +
+# Dendrogram
+dend <- as.dendrogram(result$clustering)
+
+# Convert the dendrogram to a data frame for ggplot
+dend_data <- ggdendro::dendro_data(dend)
+```
+
+```{r}
+# Responders
+responders_df <- biomarkers_clinical_filtered %>%
+  dplyr::filter(Response == "R") %>%
+  droplevels()
+
+result <- biomarkers_clustering_order(responders_df, biomarkers, "median")
+
+# Update the SampleID factor levels based on clustering order
+biomarkers_df <- result$df_biomarkers_category %>%
+  dplyr::rename(patient_response = Response,
+                sample_id = SampleID) %>%
+  dplyr::mutate(sample_id = factor(sample_id, levels = result$sample_order))
+
+# Dendrogram
+dend <- as.dendrogram(result$clustering)
+
+# Convert the dendrogram to a data frame for ggplot
+dend_data <- ggdendro::dendro_data(dend)
+```
+
+```{r}
+# Non-Responders
+responders_df <- biomarkers_clinical_filtered %>%
+  dplyr::filter(Response == "NR") %>%
+  droplevels()
+
+result <- biomarkers_clustering_order(responders_df, biomarkers, "median")
+
+# Update the SampleID factor levels based on clustering order
+biomarkers_df <- result$df_biomarkers_category %>%
+  dplyr::rename(patient_response = Response,
+                sample_id = SampleID) %>%
+  dplyr::mutate(sample_id = factor(sample_id, levels = result$sample_order))
+
+# Dendrogram
+dend <- as.dendrogram(result$clustering)
+
+# Convert the dendrogram to a data frame for ggplot
+dend_data <- ggdendro::dendro_data(dend)
+```
+
+```{r, fig.height=10, fig.width=10}
+# Make median tile plot
+
+# Ecotyper and TME plots
+ecotype_plot <- make_ecotyper_tme_annotation_plot(biomarkers_df, "Ecotype", "Ecotype category", 1, c("CE1" = "CE1", "CE2" = "CE2", "CE3" = "CE3", "CE4" = "CE4", "CE5" = "CE5", "CE6" = "CE6", "CE7" = "CE7", "CE8" = "CE8", "CE9" = "CE9", "CE10" = "CE10", "NA" = "NA"))
+tme_plot <- make_ecotyper_tme_annotation_plot(biomarkers_df, "TME", "TME category", 11, c("D" = "Desert", "F" = "Fibrotic", "IE" = "Immune-Enriched Non-Fibrotic", "IE/F" = "Immune-Enriched Fibrotic"))
+
+# Ubi and deubi plots
+ubi_plot <- make_ubi_annotation_plot(biomarkers_clinical_ubi, "ubi_lof", "LoF mutation in Ubiquitination enzyme  ", c("Absent", "Present"))
+deubi_plot <- make_ubi_annotation_plot(biomarkers_clinical_ubi, "deubi_lof", "LoF mutation in Deubiquitination enzyme", c("Absent", "Present"))
+
+# Create the final plot
+final_plot <- make_combined_biomarker_plots(biomarkers_df, biomarkers, ecotype_plot, tme_plot, ubi_plot, deubi_plot, dend_data)
+
+# Save and print the plot
+plot_path <- file.path(figures_expression_path,
+                      "cancer_immunity_cycle_biomarkers_median.png")
+ggsave(plot_path, final_plot, width = 10, height = 10, dpi = 300)
+print(final_plot)
+```
+
+## Using mean
+
+```{r}
+# Pre-process biomarkers data.frame
+biomarkers <- c("TMB", "Release_of_cancer_cell_antigens_S1_TIP", "Cancer_antigen_presentation_S2_TIP", "APM_Senb", "IP_Kalaora", "MIAS", "Priming_and_activation_S3_TIP", "Trafficking_of_immune_cells_into_tumors_overall_S4_TIP", "Infiltration_of_immune_cells_into_tumors_S5_TIP", "Cytotoxic_cells_cTME", "Dendritic_cells_cTME", "B_cells_cTME", "T_cells_CD8_cTME", "T_cells_CD4_cTME", "T_regulatory_cells_cTME", "Dysfunction", "Exclusion", "Recognition_of_cancer_cells_by_T_cells_S6_TIP", "IMRES", "Killing_of_cancer_cells_S7_TIP", "ImmuneCyt_Davoli", "Tinflam_Ayers", "TumorPurity")
+
+result <- biomarkers_clustering_order(biomarkers_clinical_ubi, biomarkers, "mean")
+
+# Dendrogram
+dend <- as.dendrogram(result$clustering)
+
+# Convert the dendrogram to a data frame for ggplot
+dend_data <- ggdendro::dendro_data(dend)
+
+# Update the SampleID factor levels based on clustering order
+biomarkers_df <- result$df_biomarkers_category %>%
+  dplyr::rename(patient_response = Response,
+                sample_id = SampleID) %>%
+  dplyr::mutate(sample_id = factor(sample_id, levels = result$sample_order))
+
+# Re-order final_category_ub_df
+
+# Filter out rows with sample_id not in sample_order
+final_category_ub_df <- category_ub_df %>%
+  dplyr::filter(sample_id %in% result$sample_order)
+
+# Replace NA values with "0"
+final_category_ub_df$Ubi_Category[is.na(final_category_ub_df$Ubi_Category)] <- "0"
+final_category_ub_df$Deubi_Category[is.na(final_category_ub_df$Deubi_Category)] <- "0"
+
+# Convert sample_id to factor with the correct levels
+final_category_ub_df <- final_category_ub_df %>%
+  mutate(sample_id = factor(sample_id, levels = result$sample_order))
+```
+
+```{r, fig.height=10, fig.width=10}
+# Make mean tile plot
+
+# Ecotyper and TME plots
+ecotype_plot <- make_ecotyper_tme_annotation_plot(biomarkers_df, "Ecotype", "Ecotype category", 1, c("CE1" = "CE1", "CE2" = "CE2", "CE3" = "CE3", "CE4" = "CE4", "CE5" = "CE5", "CE6" = "CE6", "CE7" = "CE7", "CE8" = "CE8", "CE9" = "CE9", "CE10" = "CE10", "NA" = "NA"))
+tme_plot <- make_ecotyper_tme_annotation_plot(biomarkers_df, "TME", "TME category", 11, c("D" = "Desert", "F" = "Fibrotic", "IE" = "Immune-Enriched Non-Fibrotic", "IE/F" = "Immune-Enriched Fibrotic"))
+
+# Ubi and deubi plots
+ubi_plot <- make_ubi_annotation_plot(final_category_ub_df, "Ubi_Category", "Mutation in Ubiquitination enzyme  ", c("1" = "Present", "0" = "Absent"))
+deubi_plot <- make_ubi_annotation_plot(final_category_ub_df, "Deubi_Category", "Mutation in Deubiquitination enzyme", c("1" = "Present", "0" = "Absent"))
+
+# Create the final plot
+final_plot <- make_combined_biomarker_plots(biomarkers_df, biomarkers, ecotype_plot, tme_plot, ubi_plot, deubi_plot, dend_data)
+
+# Save and print the plot
+plot_path <- file.path(figures_expression_path,
+                      "cancer_immunity_cycle_biomarkers_mean.png")
+ggsave(plot_path, final_plot, width = 10, height = 10, dpi = 300)
+print(final_plot)
+```
+
+# Explore individual gene expression profiles
+
+```{r}
+# Define genes to look and pre-processing
+hugo_ensembl_ub <- annot_lof_ub_df %>% 
+  dplyr::select(corrected_hugo_symbol, ensembl_id) %>% 
+  dplyr::distinct()
+
+ensembl_ub_vec <- hugo_ensembl_ub %>% 
+  dplyr::pull(ensembl_id)
+
+# Ubiquitin-related genes with LoF in my data
+hugo_ub_vec <- hugo_ensembl_ub %>% 
+  dplyr::pull(corrected_hugo_symbol)
+
+# Save into RDS file
+ensembl_ub_path <- file.path(results_expression_path, 
+                      "ensembl_ub_vector.rds")
+saveRDS(ensembl_ub_vec, file = ensembl_ub_path)
+hugo_ub_path <- file.path(results_expression_path, 
+                      "hugo_ub_vector.rds")
+saveRDS(hugo_ub_vec, file = hugo_ub_path)
+
+# Proteasome subunit HGNC symbols
+proteas_vec <- c("PSMB5", "PSMB6", "PSMB7", "PSMB8", "PSMB9", "PSMB10")
+
+# Filter the biomarkers_out
+ub_expression <- biomarkers_clinical_ubi %>% 
+  dplyr::select(SampleID, Response, one_of(hugo_ub_vec)) %>% 
+  droplevels()
+ub_expression_vec <- colnames(ub_expression)[-c(1, 2)]
+  
+proteas_expression <- biomarkers_clinical_ubi %>% 
+  dplyr::select(SampleID, Response, one_of(proteas_vec)) %>% 
+  droplevels()
+proteas_expression_vec <- colnames(proteas_expression)[-c(1, 2)]
+```
+
+## Ubiquitin gene expression table
+
+```{r}
+datatable(ub_expression, 
+          extensions = c('Buttons', 
+                         'FixedColumns'), 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=8,
+            fixedColumns = list(leftColumns = 2), # Freeze the first 2 columns
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Expression analysis of Ubiquitin-related genes with LoF in samples."
+        )
+```
+
+## Boxplots of ub genes
+
+```{r}
+# Loop through the biomarkers and generate a boxplot for each
+plots <- list()
+for (biomarker in ub_expression_vec) {
+  p <- create_biomarker_boxplot(ub_expression, biomarker)
+  plots[[biomarker]] <- p
+}
+
+# Print the plots
+for (biomarker in ub_expression_vec) {
+  print(plots[[biomarker]])
+}
+```
+
+## Proteasome subunit expression table
+
+```{r}
+datatable(proteas_expression, 
+          extensions = c('Buttons', 
+                         'FixedColumns'), 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=8,
+            fixedColumns = list(leftColumns = 2), # Freeze the first 2 columns
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Expression analysis of Proteasome subunits."
+        )
+```
+
+## Boxplots of proteasome genes
+
+```{r}
+# Loop through the biomarkers and generate a boxplot for each
+plots <- list()
+for (biomarker in proteas_expression_vec) {
+  p <- create_biomarker_boxplot(proteas_expression, biomarker)
+  plots[[biomarker]] <- p
+}
+
+# Print the plots
+for (biomarker in proteas_expression_vec) {
+  print(plots[[biomarker]])
+}
+```
+
+## Plots
+
+```{r}
+# TODO: make a tile plot with high/low expression of ubi genes and another for proteasome subunits.
+```
+
+# Relate Ubi mutation presence with Tumor Purity
+
+```{r}
+fora_results_lof_csv_path <- file.path(results_ubfora_path, "fora_results_ubiquitin_lof.csv")
+fora_results_ubiquitin_lof_df <- read.csv(fora_results_lof_csv_path, header = TRUE)[ , -1]
+
+prepared_data_df <- fora_results_ubiquitin_lof_df %>%
+  dplyr::rename(count = overlap) %>% 
+  dplyr::select(sample_id, pathway, count, size) %>% 
+  dplyr::mutate(gene_ratio = count / size) %>% 
+  dplyr::left_join(biomarkers_clinical_ubi %>% dplyr::select(SampleID, TumorPurity), 
+                   by=c("sample_id" = "SampleID")) %>% 
+  dplyr::filter(!sample_id %in% c("MM909_20", "MM909_24"))
+
+# Calculate the correlation for each pathway
+correlations <- prepared_data_df %>%
+  dplyr::group_by(pathway) %>%
+  dplyr::summarise(correlation = cor(TumorPurity, count, use = "complete.obs"))
+
+# Print the correlations
+# These are global correlation between TumorPurity and LoF mutations count in all samples for each pathway.
+print(correlations)
+```
+
+# Plot of Ubi LoF count and TumorPurity
+
+```{r, fig.height=3, fig.width=14}
+response_df <- biomarkers_clinical_ubi %>% 
+  dplyr::select(SampleID, Response)
+
+response_plot <- ggplot(response_df, aes(x = SampleID, y = "1", fill = Response)) +
+    geom_tile(color = "black", linewidth = 0.5) +
+    scale_fill_manual(values = c("R" = "#0072B2", "NR" = "#F0E442"),
+                      labels = c("R" = "Responders", "NR" = "Non-responders")) +
+    labs(x = NULL, 
+         y = NULL,
+         fill = "Patient Response") +
+    theme_minimal() +
+    theme(axis.text.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          axis.text.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          legend.position = "right",
+          plot.margin = margin(0, 0, 0, 0, "pt"))
+
+plot1 <- ggplot(prepared_data_df, aes_string(x = "sample_id", y = "1", fill = "TumorPurity")) +
   geom_tile(color = "black", linewidth = 0.5) +
+  scale_fill_gradient(low = "white", high = "#D55E00") +
   scale_y_continuous(expand = c(0, 0), breaks = NULL) +
-  scale_fill_manual(values = c("R" = "blue", "NR" = "yellow"),
-                    labels = c("R" = "Responders", "NR" = "Non-responders")) +
-  labs(x = NULL, 
-       y = NULL,
-       fill = "Patient Response",
-       title = "Cancer-Immunity Cycle biomarkers") +
+  labs(x = NULL, y = NULL, fill = "Tumor Purity") +
   theme_minimal() +
   theme(axis.text.x = element_blank(),
         axis.ticks.x = element_blank(),
         axis.text.y = element_blank(),
         axis.ticks.y = element_blank(),
-        legend.position = "right")
+        legend.position = "right",
+        plot.margin = margin(0, 0, 0, 0, "pt"))
 
-# TODO: Add the EMT and Ecotyper with legends
-ecotype_plot <- make_ecotyper_tme_annotation_plot(biomarkers_df, "Ecotype", "Ecotype category", 1, c("CE1" = "CE1", "CE2" = "CE2", "CE3" = "CE3", "CE4" = "CE4", "CE5" = "CE5", "CE6" = "CE6", "CE7" = "CE7", "CE8" = "CE8", "CE9" = "CE9", "CE10" = "CE10", "NA" = "NA"))
-tme_plot <- make_ecotyper_tme_annotation_plot(biomarkers_df, "TME", "TME category", 11, c("D" = "Desert", "F" = "Fibrotic", "IE" = "Immune-Enriched Non-Fibrotic", "IE/F" = "Immune-Enriched Fibrotic"))
+plot2 <- ggplot(prepared_data_df, aes(x = sample_id, y = pathway, fill = count)) +
+  geom_tile(color = "black", linewidth = 0.5) +
+  scale_fill_gradient(low = "white", high = "#009E73") +
+  labs(x = "Sample ID", y = "Ubi gene category", fill = "Count of LoF mutations") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "right",
+        plot.margin = margin(0, 0, 0, 0, "pt"))
 
-# Create the final plot
-final_plot <- make_combined_biomarker_plots(biomarkers_filtered, biomarkers, ecotype_plot, tme_plot)
-  
-# Save and print the plot
-plot_path <- file.path(figures_expression_path, 
-                      "cancer_immunity_cycle_biomarkers.png")
-ggsave(plot_path, final_plot, width = 10, height = 14, dpi = 300)
+# Extract legends
+legend0 <- get_legend(response_plot)
+legend1 <- get_legend(plot1)
+legend2 <- get_legend(plot2)
+
+# Combine plots without legends
+combined_plot <- response_plot + plot1 + plot2 + plot_layout(ncol = 1, heights = c(1, 1, 5)) & theme(legend.position = "none")
+
+# Combine legends
+combined_legends <- plot_grid(as_ggplot(legend0), as_ggplot(legend1), as_ggplot(legend2), ncol = 3, align = "h")
+
+# Combine plots and legends
+final_plot <- plot_grid(combined_plot, combined_legends, ncol = 2, rel_widths = c(4, 2))
+
+# Print the final plot
 print(final_plot)
+```
+
+Looks like Lars hypothesis was correct, as I can see that the higher counts in LoF mutations are associated with higher Tumor Purity.
+
+# Plot of Ubi LoF gene_ratio and TumorPurity
+
+```{r, fig.height=3, fig.width=14}
+plot1 <- ggplot(prepared_data_df, aes_string(x = "sample_id", y = "1", fill = "TumorPurity")) +
+  geom_tile(color = "black", linewidth = 0.5) +
+  scale_fill_gradient(low = "white", high = "#D55E00") +
+  scale_y_continuous(expand = c(0, 0), breaks = NULL) +
+  labs(x = NULL, y = NULL, fill = "Tumor Purity") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "right",
+        plot.margin = margin(0, 0, 0, 0, "pt"))
+
+plot2 <- ggplot(prepared_data_df, aes(x = sample_id, y = pathway, fill = gene_ratio)) +
+  geom_tile(color = "black", linewidth = 0.5) +
+  scale_fill_gradient(low = "white", high = "#009E73") +
+  labs(x = "Sample ID", y = "Ubi gene category", fill = "Gene ratio of LoF mutations") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "right",
+        plot.margin = margin(0, 0, 0, 0, "pt"))
+
+# Extract legends
+legend0 <- get_legend(response_plot)
+legend1 <- get_legend(plot1)
+legend2 <- get_legend(plot2)
+
+# Combine plots without legends
+combined_plot <- response_plot + plot1 + plot2 + plot_layout(ncol = 1, heights = c(1, 1, 5)) & theme(legend.position = "none")
+
+# Combine legends
+combined_legends <- plot_grid(as_ggplot(legend0), as_ggplot(legend1), as_ggplot(legend2), ncol = 3, align = "h")
+
+# Combine plots and legends
+final_plot <- plot_grid(combined_plot, combined_legends, ncol = 2, rel_widths = c(4, 2))
+
+# Print the final plot
+print(final_plot)
+```
+
+# TumorPurity coexpression with ubi expression/enrichment
+
+```{r}
+# Correlation plot of TumorPurity and ubi genes expressed
+
+# Filter
+tumor_pur_ub_genes_exp <- biomarkers_clinical_ubi %>% 
+  dplyr::select(TumorPurity, one_of(ub_expression_vec)) %>% 
+  dplyr::select_if(~ !all(is.na(.)))
+
+# Compute the correlation matrix
+cor_matrix <- cor(tumor_pur_ub_genes_exp, use = "pairwise.complete.obs", method = "pearson")
+
+# Convert correlation matrix to long format
+cor_long <- as.data.frame(as.table(cor_matrix))
+
+# Filter pairs with high correlation (e.g., |correlation| > 0.8 and not comparing the same biomarker)
+high_cor_pairs <- cor_long %>%
+  filter(Var1 != Var2, abs(Freq) > 0.8) %>%
+  arrange(desc(abs(Freq)))
+
+# Print highly correlated pairs
+print(high_cor_pairs)
+
+# Open a new plotting window
+plot.new()
+dev.off()
+
+# Visualize the correlation matrix with reduced text size
+png(file.path(figures_expression_path, "tumor_purity_ubi_gene_expression_correlation.png"), width = 1200, height = 1000)
+corrplot(cor_matrix, method = "color", type = "upper", order = "hclust", 
+         tl.col = "black", tl.srt = 45, addCoef.col = NULL, number.cex = NULL, tl.cex = 0.6)
+dev.off()
+
+# Possible in the future: Tile plot with sample_id on x axis, mean of ubi genes, deubi genes expression in y axis and TumorPurity in y axis as well. Different gradient for TumorPurity and pathways. 
+```
+
+# Ubiquitin LoF and expression plot
+
+```{r, fig.height=14, fig.width=8}
+ub_expression_long <- ub_expression %>% 
+  tidyr::pivot_longer(cols = -c(SampleID, Response),
+                      names_to = "corrected_hugo_symbol",
+                      values_to = "expression")
+
+gene_ub_cat <- cat_lof_ub_df %>% 
+  dplyr::select(corrected_hugo_symbol, category, ub_category) %>% 
+  dplyr::distinct()
+
+correct_hugo <- cat_lof_ub_df %>% 
+  dplyr::select(hugo_symbol, corrected_hugo_symbol) %>% 
+  dplyr::distinct()
+
+# Identify genes with both "C19_genes" and another category within "deubiquitination"
+genes_with_multiple_categories <- gene_ub_cat %>%
+  filter(ub_category == "deubiquitination") %>%
+  group_by(corrected_hugo_symbol) %>%
+  filter(n_distinct(category) > 1) %>%
+  pull(corrected_hugo_symbol) %>%
+  unique()
+
+# Filter the data frame to remove "C19_genes" for those genes only
+gene_ub_cat <- gene_ub_cat %>%
+  filter(!(corrected_hugo_symbol %in% genes_with_multiple_categories & ub_category == "deubiquitination" & category == "C19_genes"))
+
+ub_lof_expression <- ub_expression_long %>% 
+  dplyr::left_join(gene_ub_cat, by="corrected_hugo_symbol")
+
+lof_ub_binary_path <- file.path(results_ubgenesets_path, 
+                      "lof_ub_binary.rds")
+lof_ub_binary <- readRDS(lof_ub_binary_path)
+
+lof_ub_binary_filtered <- lof_ub_binary %>% 
+  dplyr::filter(rowSums(select(., -ensembl_id, -hugo_symbol)) != 0) %>% 
+  dplyr::left_join(correct_hugo, by="hugo_symbol") %>% 
+  dplyr::select(-ensembl_id, -hugo_symbol) %>% 
+  dplyr::select(corrected_hugo_symbol, everything())
+
+# Pivot lof_ub_binary_filtered to long format
+lof_ub_long <- lof_ub_binary_filtered %>%
+  pivot_longer(cols = -corrected_hugo_symbol, 
+               names_to = "SampleID", 
+               values_to = "ubi_lof")
+
+# Join the data frames
+ub_lof_expression_presence <- ub_lof_expression %>%
+  dplyr::left_join(lof_ub_long, by = c("SampleID", "corrected_hugo_symbol")) %>% 
+  dplyr::mutate(ubi_lof = as.character(ubi_lof)) %>%
+  dplyr::mutate(ubi_lof = ifelse(is.na(ubi_lof), "0", ubi_lof))
+
+# Plot using gradient for expression
+plot <- ggplot(ub_lof_expression_presence, aes(x = SampleID, y = corrected_hugo_symbol, fill = expression)) +
+  geom_tile(color = "black", linewidth = 0.5) +
+  scale_fill_gradient(low = "white", high = "#009E73") +
+  geom_point(data = ub_lof_expression_presence %>% filter(ubi_lof == "1"),
+             aes(shape = "Present"), color = "#D55E00", size = 3, show.legend = TRUE) +
+  labs(x = "Sample ID", y = "Genes with LoF", fill = "Expression Level", shape = "LoF mutation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "right",
+        plot.margin = margin(0, 0, 0, 0, "pt"))
+
+# Extract legends
+legend0 <- get_legend(response_plot)
+legend1 <- get_legend(plot)
+
+# Combine plots without legends
+combined_plot <- response_plot + plot + plot_layout(ncol = 1, heights = c(0.25, 14)) & theme(legend.position = "none")
+
+# Combine legends
+combined_legends <- plot_grid(as_ggplot(legend0), as_ggplot(legend1), ncol = 1, align = "v")
+
+# Combine plots and legends
+final_plot <- plot_grid(combined_plot, combined_legends, ncol = 2, rel_widths = c(4, 1))
+
+# Print the final plot
+print(final_plot)
+
+# Save the ggplot
+plot_path <- file.path(figures_expression_path,
+                      "ubiquitin_lof_presence_and_expression.png")
+ggsave(plot_path, final_plot, width = 14, height = 8, dpi = 300)
+```
+
+I need to normalize the expression values, otherwise it's difficult to see any green. Grey are NAs.
+
+# Tile plots of biomarkers + ubi info
+
+```{r}
+# Summarize the ubi counts
+summarized_data <- prepared_data_df %>%
+  dplyr::group_by(sample_id) %>%
+  dplyr::summarize(
+    ubi_counts = sum(count[pathway %in% c("Ubiquitin-protein ligase family", "Ubiquitin-activating enzymes", "Ubiquitin-conjugating enzymes")]),
+    deubi_counts = sum(count[pathway %in% c("Deubiquitinases", "Peptidase family C19")])
+  )
+
+# Prepare input full df
+biomarkers_clinical_ubi_counts <- biomarkers_clinical_ubi %>% 
+  dplyr::left_join(summarized_data, by=c("SampleID" = "sample_id"))
+
+# Save into RDS file
+full_df_path <- file.path(results_expression_path, 
+                      "biomarkers_clinical_ubi_counts.rds")
+saveRDS(biomarkers_clinical_ubi_counts, file = full_df_path)
+```
+
+```{r, fig.width=8, fig.height=6}
+numerical_biomarkers <- c("TMB", "Release_of_cancer_cell_antigens_S1_TIP", "Cancer_antigen_presentation_S2_TIP", "APM_Senb", "IP_Kalaora", "MIAS", "Priming_and_activation_S3_TIP", "Trafficking_of_immune_cells_into_tumors_overall_S4_TIP", "Infiltration_of_immune_cells_into_tumors_S5_TIP", "Cytotoxic_cells_cTME", "Dendritic_cells_cTME", "B_cells_cTME", "T_cells_CD8_cTME", "T_cells_CD4_cTME", "T_regulatory_cells_cTME", "Dysfunction", "Exclusion", "Recognition_of_cancer_cells_by_T_cells_S6_TIP", "IMRES", "Killing_of_cancer_cells_S7_TIP", "ImmuneCyt_Davoli", "Tinflam_Ayers", "TumorPurity")
+categorical_biomarkers <- c("TME", "Ecotype")
+
+# pheatmap_biomarkers_both_response_ubi_binary
+p1 <- pheatmap_biomarkers(biomarkers_clinical_ubi_counts, numerical_biomarkers, categorical_biomarkers, response_col = "Response", ubi_counts = FALSE, split_response = FALSE)
+
+# Save the plot using the png function
+plot_path <- file.path(figures_expression_path, "pheatmap_biomarkers_both_response_ubi_binary.png")
+png(filename = plot_path, width = 8, height = 6, units = "in", res = 300)
+print(p1)
+dev.off()
+
+# pheatmap_biomarkers_split_response_ubi_binary
+p2 <- pheatmap_biomarkers(biomarkers_clinical_ubi_counts, numerical_biomarkers, categorical_biomarkers, response_col = "Response", ubi_counts = FALSE, split_response = TRUE)
+
+# Save the ggplot
+plot_path <- file.path(figures_expression_path,
+                      "pheatmap_biomarkers_split_response_ubi_binary.png")
+ggsave(plot_path, p2, width = 16, height = 10, dpi = 300)
+
+# pheatmap_biomarkers_both_response_ubi_counts
+p3 <- pheatmap_biomarkers(biomarkers_clinical_ubi_counts, numerical_biomarkers, categorical_biomarkers, response_col = "Response", ubi_counts = TRUE, split_response = FALSE)
+
+# Save the plot using the png function
+plot_path <- file.path(figures_expression_path, "pheatmap_biomarkers_both_response_ubi_counts.png")
+png(filename = plot_path, width = 10, height = 6, units = "in", res = 300)
+print(p3)
+dev.off()
+
+# pheatmap_biomarkers_split_response_ubi_counts
+p4 <- pheatmap_biomarkers(biomarkers_clinical_ubi_counts, numerical_biomarkers, categorical_biomarkers, response_col = "Response", ubi_counts = TRUE, split_response = TRUE)
+
+# Save the ggplot
+plot_path <- file.path(figures_expression_path,
+                      "pheatmap_biomarkers_split_response_ubi_counts.png")
+ggsave(plot_path, p4, width = 16, height = 10, dpi = 300)
+
+# pheatmap_biomarkers_both_response_ubi_binary
+p5 <- pheatmap_biomarkers(biomarkers_clinical_ubi_counts, numerical_biomarkers, categorical_biomarkers, response_col = "resp_3_cat", ubi_counts = FALSE, split_response = FALSE)
+
+# Save the plot using the png function
+plot_path <- file.path(figures_expression_path, "pheatmap_biomarkers_three_response_ubi_binary.png")
+png(filename = plot_path, width = 8, height = 6, units = "in", res = 300)
+print(p5)
+dev.off()
+
+# pheatmap_biomarkers_split_response_ubi_binary
+p6 <- pheatmap_biomarkers(biomarkers_clinical_ubi_counts, numerical_biomarkers, categorical_biomarkers, response_col = "resp_3_cat", ubi_counts = FALSE, split_response = TRUE)
+
+# Save the ggplot
+plot_path <- file.path(figures_expression_path,
+                      "pheatmap_biomarkers_three_split_response_ubi_binary.png")
+ggsave(plot_path, p6, width = 24, height = 10, dpi = 300)
+
+# pheatmap_biomarkers_both_response_ubi_counts
+p7 <- pheatmap_biomarkers(biomarkers_clinical_ubi_counts, numerical_biomarkers, categorical_biomarkers, response_col = "resp_3_cat", ubi_counts = TRUE, split_response = FALSE)
+
+# Save the plot using the png function
+plot_path <- file.path(figures_expression_path, "pheatmap_biomarkers_three_response_ubi_counts.png")
+png(filename = plot_path, width = 10, height = 6, units = "in", res = 300)
+print(p7)
+dev.off()
+
+# pheatmap_biomarkers_split_response_ubi_counts
+p8 <- pheatmap_biomarkers(biomarkers_clinical_ubi_counts, numerical_biomarkers, categorical_biomarkers, response_col = "resp_3_cat", ubi_counts = TRUE, split_response = TRUE)
+
+# Save the ggplot
+plot_path <- file.path(figures_expression_path,
+                      "pheatmap_biomarkers_three_split_response_ubi_counts.png")
+ggsave(plot_path, p8, width = 24, height = 10, dpi = 300)
 ```
 
 # Session Info

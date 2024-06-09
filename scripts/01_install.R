@@ -55,6 +55,9 @@ if (!requireNamespace("patchwork", quietly = TRUE)) {
 if (!requireNamespace("ggpubr", quietly = TRUE)) {
   install.packages("ggpubr")
 }
+if (!requireNamespace("ggdendro", quietly = TRUE)) {
+  install.packages("ggdendro")
+}
 if (!("VariantAnnotation" %in% installed.packages())) {
   # Install this package if it isn't installed yet
   BiocManager::install("VariantAnnotation", update = FALSE)

@@ -195,7 +195,12 @@ ensembl_ids <- ENTREZtoENSEMBL(entrez_ids)
 ## Step 3: Add the new_entrez_ids to the dataframe
 maf_df_annotated <- maf_df_annotated %>%
   dplyr::mutate(ensembl_id = ensembl_ids) %>% 
-  dplyr::select(sample_id, ensembl_id, entrez_id, hugo_symbol, everything())
+  dplyr::select(sample_id, ensembl_id, entrez_id, hugo_symbol, everything()) %>% 
+  dplyr::filter(!(sample_id %in% c("MM909_20", "MM909_24")))
+
+# Save RDS
+maf_df_anno_path <- file.path(results_fip_path, "maf_df_annotated.rds")
+saveRDS(maf_df_annotated, maf_df_anno_path)
 ```
 
 There is a "problem" here: some Entrez IDs are mapped to several Ensembl Gene IDs. I need to resolve this because otherwise it will impact the TMB calculation and possibly other analyses. I decided to keep the first Ensembl Gene ID that appears in the table for equal rows.
@@ -273,6 +278,7 @@ vep_df_clean <- vep_df %>%
   dplyr::select(where(~any(!is.na(.)))) %>% 
   dplyr::rename(sample_id = X.Uploaded_variation,
          ensembl_id = Gene) %>% 
+  dplyr::filter(!(sample_id %in% c("MM909_20", "MM909_24"))) %>% 
   dplyr::mutate(
     SIFT_cleaned = str_extract(SIFT, "^[^(]+"), 
     PolyPhen_cleaned = str_extract(PolyPhen, "^[^(]+"),
@@ -520,6 +526,9 @@ ggsave(lof_PolyPhen_plot_path, lof_PolyPhen_plot, width = 10, height = 8, dpi = 
 ## Box plot of TMB grouped by response
 
 ```{r, message=FALSE, warning=FALSE}
+# Load ggpubr
+library(ggpubr)
+
 # Merge sup1_response with tmb_df
 tmb_response_df <- tmb_df %>% 
   left_join(sup1_response_df %>% 
@@ -528,18 +537,29 @@ tmb_response_df <- tmb_df %>%
   ) %>% 
   dplyr::select(sample_id,
          TMB,
-         patient_response = Patient.Response)
+         patient_response = Patient.Response) %>% 
+  dplyr::filter(!(sample_id %in% c("MM909_20", "MM909_24")))
+
+# Perform the Mann-Whitney test and extract p-value
+test_result <- compare_means(TMB ~ patient_response, data = tmb_response_df, method = "wilcox.test", p.adjust.method = "none")
+
+# Print the test result to see the p-value
+print(test_result)
 
 # Define output path
 tmb_boxplot_path <- file.path(figures_fip_path, 
                            "tmb_boxplot.png")
 
-# Create a boxplot
+# Create a boxplot with medians and p-value displayed
 tmb_boxplot <- ggplot(tmb_response_df, aes(x = patient_response, 
                                            y = TMB, 
                                            fill = patient_response)) +
   geom_boxplot() +
-  scale_fill_brewer(palette = "Set1") +
+  stat_summary(fun = median, geom = "text", aes(label = round(..y.., 2)), 
+               position = position_nudge(x = 0, y = 1.5), size = 4, color = "white") +
+  stat_compare_means(method = "wilcox.test", label = "p.signif", label.x = 1.5) +  # Add p-value from Mann-Whitney test
+  scale_fill_manual(values = c(R = "#009E73", NR = "#D55E00"),
+                    labels = c("R" = "Responders", "NR" = "Non-responders")) +
   scale_x_discrete(labels = c("NR" = "Non-responders", 
                               "R" = "Responders")) +  # Manually set x-axis labels
   theme_minimal() +
@@ -551,13 +571,14 @@ tmb_boxplot <- ggplot(tmb_response_df, aes(x = patient_response,
   ) +
   labs(title = "TMB by Patient Response",
        x = "Patient Response",
-       y = "Tumor Mutational Burden (TMB)")
+       y = "Tumor Mutational Burden (TMB)",
+       fill = "Patient Response")
 
 # Print plot
 print(tmb_boxplot)
 
 # Save plot
-ggsave(tmb_boxplot_path, tmb_boxplot, width = 10, height = 8, dpi = 300)
+ggsave(tmb_boxplot_path, tmb_boxplot, width = 8, height = 6, dpi = 300)
 ```
 
 # MAFtools
@@ -581,7 +602,8 @@ maf_df <- read_excel(maf_path,
                         col_names=TRUE) %>% 
   mutate(sample_id = sub("_[12]$", "", tumor_name)) %>% 
   dplyr::select(sample_id, everything()) %>% 
-  arrange(sample_id)
+  arrange(sample_id) %>% 
+  dplyr::filter(!(sample_id %in% c("MM909_20", "MM909_24")))
   
 clinical_df <- read_excel(clinical_path,
                           skip=1,
@@ -593,17 +615,33 @@ mapping_df <- maf_df_annotated %>%
   dplyr::select(sample_id, Tumor_Sample_Barcode) %>%
   distinct()
 
-clinical_df <- clinical_df %>%
-  left_join(mapping_df, by = "sample_id")
+# Clean sup1_response_df
+clinical_resp_df <- sup1_response_df %>% 
+  dplyr::rename(sample_id = Sample.ID,
+                Patient_Response = Patient.Response) %>% 
+  dplyr::mutate(
+    Patient_Response = case_when(
+      Patient_Response == "R" ~ "Responders",
+      Patient_Response == "NR" ~ "Non-responders"
+    )
+  )
+
+clinical_resp_df <- clinical_resp_df %>%
+  left_join(mapping_df, by = "sample_id") %>% 
+  dplyr::rename(Sample_ID = sample_id)
+
+maf_df_annotated <- maf_df_annotated %>% 
+  dplyr::rename(Sample_ID = sample_id)
 
 # Load maf with clinical data
-mm909 = read.maf(maf = maf_df, clinicalData = clinical_df)
+mm909 = read.maf(maf = maf_df_annotated, clinicalData = clinical_resp_df)
 ```
 
 ## Summaries
 
 ```{r, message=FALSE, warning=FALSE}
 ## Shows sample summry.
+sample_sum <- getSampleSummary(mm909)
 getSampleSummary(mm909)
 
 ## Shows gene summary.
@@ -622,12 +660,72 @@ write.mafSummary(maf = mm909, basename = file.path(results_fip_path, 'mm909'))
 ## Visualization
 
 ```{r, message=FALSE, warning=FALSE}
+# Define output path
+plot_path1 <- file.path(figures_fip_path, "maf_summary.png")
+
+# Open a PNG device
+png(filename = plot_path1, width = 3000, height = 1600, res = 300)
+
+# Generate the plot
 plotmafSummary(maf = mm909, rmOutlier = TRUE, addStat = 'median', dashboard = TRUE, titvRaw = FALSE)
+
+# Close the device
+dev.off()
+
+knitr::include_graphics(plot_path1)
 ```
 
-```{r, message=FALSE, warning=FALSE}
+```{r}
+library(maftools)
+
+# Get the summary of mutations per sample
+sample_summary <- getSampleSummary(mm909)
+
+# View the sample summary to understand the data structure
+print(sample_summary)
+
+# Extract and count the total SNPs and DNPs
+total_snps <- sum(sample_summary$SNP)
+total_dnps <- sum(sample_summary$DNP)
+
+# Print the results
+cat("Total SNPs:", total_snps, "\n")
+cat("Total DNPs:", total_dnps, "\n")
+```
+
+```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=8}
 # Oncoplot for top ten mutated genes.
-oncoplot(maf = mm909, top = 20)
+
+# Define output path
+plot_path2 <- file.path(figures_fip_path, "maf_top50.png")
+
+# Open a PNG device
+png(filename = plot_path2, width = 3500, height = 4000, res = 300)
+
+#Color coding for response
+resp_colors = c("#009E73", "#D55E00")
+names(resp_colors) = c("Responders", "Non-responders")
+response_colors = list(Patient_Response = resp_colors)
+
+#Color coding for sample id
+sample_colors <- c(
+  "#56B4E9", "#999999", "#8A2BE2", "#E69F00", "#D55E00", "#CC79A7", 
+  "#009E73", "#F0E442", "#0072B2", "#FF69B4", "#FFD700", "#000000", 
+  "#00CED1", "#4B0082", "#1E90FF", "#FF6347", "#32CD32", "#8B4513", 
+  "#FF4500", "#B22222", "#FFDAB9", "#20B2AA"
+)
+names(sample_colors) = unique(maf_df_annotated$Sample_ID)
+sample_id_colors = list(Sample_ID = sample_colors)
+
+print(response_colors)
+
+# Generate plot
+oncoplot(maf = mm909, top = 50, drawColBar = FALSE, clinicalFeatures = c('Patient_Response', 'Sample_ID'), sortByAnnotation = TRUE, annotationColor = c(response_colors, sample_id_colors), anno_height = 0.25, legend_height = 1)
+
+# Close the device
+dev.off()
+
+knitr::include_graphics(plot_path2)
 ```
 
 ```{r, message=FALSE, warning=FALSE}
@@ -638,6 +736,70 @@ plotTiTv(res = mm909.titv)
 
 ```{r, message=FALSE, warning=FALSE}
 mm909.mutload = tcgaCompare(maf = mm909, cohortName = 'Example-mm909', logscale = TRUE, capture_size = 50)
+```
+
+## Explore shared mutated genes
+
+```{r, warning=FALSE, message=FALSE}
+library(VennDiagram)
+
+resp_df <- clinical_resp_df %>% 
+  dplyr::select(Sample_ID, Patient_Response)
+
+maf_df_resp <- maf_df_annotated %>% 
+  dplyr::left_join(resp_df, by="Sample_ID")
+
+# Get genes for each response group
+responder_genes <- maf_df_resp %>%
+  dplyr::filter(Patient_Response == "Responders") %>%
+  pull(hugo_symbol) %>%
+  unique()
+
+non_responder_genes <- maf_df_resp %>%
+  dplyr::filter(Patient_Response == "Non-responders") %>%
+  pull(hugo_symbol) %>%
+  unique()
+
+# Identify unique and shared genes
+shared_genes <- intersect(responder_genes, non_responder_genes)
+unique_responder_genes <- setdiff(responder_genes, shared_genes)
+unique_non_responder_genes <- setdiff(non_responder_genes, shared_genes)
+
+# Define the lists for the Venn diagram
+gene_lists <- list(
+  Responder = responder_genes,
+  Non_responder = non_responder_genes
+)
+
+# Set up PNG device to save the plot
+venn_path <- file.path(figures_fip_path, "venn_diagram_shared_genes_lof.png")
+png(filename = venn_path, width = 1000, height = 700, res = 300)
+
+# Generate Venn diagram
+venn.plot <- draw.pairwise.venn(
+  area1 = length(responder_genes),
+  area2 = length(non_responder_genes),
+  cross.area = length(shared_genes),
+  category = c("Responders", "Non-responders"),
+  fill = c("#009E73", "#D55E00"),
+  cex = 1,        # Adjust font size of numbers
+  cat.cex = 1,  # Adjust category label font size
+  cat.col = c("black", "black"),
+  cat.pos = 0,         # Positions for category names (0 degrees, on top)
+  cat.dist = 0.07,     # Increase this if labels overlap with the circles
+  euler.d = TRUE,      # Force circles to be more circular
+  lwd = 2,      # Line width
+  filename = NULL
+)
+
+# Display the plot
+grid.newpage()
+grid.draw(venn.plot)
+
+# Save the plot
+dev.off()
+
+knitr::include_graphics(venn_path)
 ```
 
 # Session Info

@@ -334,11 +334,11 @@ pat_df <- sup1_final %>%
   dplyr::mutate(os_binary = ifelse(OS.Time >= 24, "1", "0")) %>% 
   dplyr::arrange(mut_load)
 
-cbPalette <- c("#56B4E9", "#999999", "purple", "#E69F00", "#D55E00", "#CC79A7", "#009E73", "#F0E442", "#0072B2")
+  cbPalette <- c("#56B4E9", "#999999", "#8A2BE2", "#E69F00", "#00CED1", "#CC79A7", "#4B0082", "#F0E442", "#0072B2", "#FF69B4", "#000000")
 
 p1 <- ggplot(pat_df, aes(x = reorder(sample_id, mut_load), y = mut_load, fill = patient_response)) +
   geom_bar(stat = "identity", width = 0.7, linewidth = 0.5, color = "black") +
-  scale_fill_manual(values = c("R" = "darkgreen", "NR" = "darkred"),
+  scale_fill_manual(values = c(R = "#009E73", NR = "#D55E00"),
                     labels = c("R" = "Responders", "NR" = "Non-responders")) +
   labs(x = NULL, 
        y = "Mutation Load",

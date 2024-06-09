@@ -858,6 +858,116 @@ extract_family_info <- function(file_path) {
 }
 ```
 
+# Biomarkers tile plot with dendrogram
+
+```{r}
+# Define function to generate combined plot for all biomarkers
+make_combined_biomarker_plots <- function(df, biomarkers, ecotype_plot, tme_plot, ubi_plot, deubi_plot, dend_data) {
+  
+  # Create dendrogram
+  dend_plot <- ggplot() +
+    geom_segment(data = dend_data$segments, aes(x, y, xend = xend, yend = yend)) +
+    scale_y_reverse() +
+    coord_fixed(ratio = 1.45, expand = FALSE) + 
+    labs(x = NULL, 
+         y = NULL) +
+    theme_minimal() +
+    theme(axis.text.y = element_blank(),
+          axis.title.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          axis.text.x = element_blank(),
+          axis.title.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          plot.margin = unit(c(0, 12.2, 0, 0), "cm"))
+  
+  # Fix the width by using cowplot's plot_grid
+  dend_plot <- plot_grid(dend_plot, ncol = 1, rel_widths = c(0.1))
+  
+  # Create the response plot
+  response_plot <- ggplot(df, aes(x = sample_id, y = "1", fill = patient_response)) +
+    geom_tile(color = "black", linewidth = 0.5) +
+    scale_fill_manual(values = c("R" = "#0072B2", "NR" = "#F0E442"),
+                      labels = c("R" = "Responders", "NR" = "Non-responders")) +
+    labs(x = NULL, 
+         y = NULL,
+         fill = "Patient Response",
+         title = "Cancer-Immunity Cycle biomarkers") +
+    theme_minimal() +
+    theme(axis.text.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          axis.text.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          legend.position = "right",
+          plot.margin = margin(0, 0, 0, 0, "pt"))
+  
+  # Create first label plot
+  manual_label_plots <- list()
+  manual_label_plots[[1]] <- ggdraw() + 
+    draw_label("Patient response", x = 0, hjust = 0, angle = 0, size = 12) +
+    theme(plot.margin = margin(0, 0, 0, 0, "pt"))
+  manual_label_plots[[2]] <- ggdraw() + 
+    draw_label("Ecotype category", x = 0, hjust = 0, angle = 0, size = 12) +
+    theme(plot.margin = margin(0, 0, 0, 0, "pt"))
+  manual_label_plots[[3]] <- ggdraw() + 
+    draw_label("TME category", x = 0, hjust = 0, angle = 0, size = 12) +
+    theme(plot.margin = margin(0, 0, 0, 0, "pt"))
+  manual_label_plots[[4]] <- ggdraw() + 
+    draw_label("Ubi mutation", x = 0, hjust = 0, angle = 0, size = 12) +
+    theme(plot.margin = margin(0, 0, 0, 0, "pt"))
+  manual_label_plots[[5]] <- ggdraw() + 
+    draw_label("Deubi mutation", x = 0, hjust = 0, angle = 0, size = 12) +
+    theme(plot.margin = margin(0, 0, 0, 0, "pt"))
+  
+  # Create plots for each biomarker
+  biomarker_plots <- list()
+  label_plots <- list()
+  for (i in seq_along(biomarkers)) {
+    show_sample_id <- ifelse(i == length(biomarkers), TRUE, FALSE)
+    biomarker_plots[[i]] <- make_biomarker_annotation_plot(
+      df, paste0(biomarkers[i], "_Category"), biomarkers[i], show_sample_id)
+    label_plots[[i]] <- ggdraw() + 
+      draw_label(biomarkers[i], x = 0, hjust = 0, angle = 0, size = 12) +
+      theme(plot.margin = margin(0, 0, 0, 0, "pt"))
+  }
+  
+  # Extract legends
+  legends <- list(
+    p1_legend = get_legend(response_plot),
+    p2_legend = get_legend(ecotype_plot),
+    p3_legend = get_legend(tme_plot),
+    p4_legend = get_legend(ubi_plot),
+    p5_legend = get_legend(deubi_plot),
+    p6_legend = get_legend(biomarker_plots[[length(biomarkers)]])
+  )
+  
+  # Combine all plots
+  combined_plot <- response_plot + theme(legend.position = "none") + manual_label_plots[[1]]
+  combined_plot <- combined_plot / (ecotype_plot + theme(legend.position = "none") + manual_label_plots[[2]])
+  combined_plot <- combined_plot / (tme_plot + theme(legend.position = "none") + manual_label_plots[[3]])
+  combined_plot <- combined_plot / (ubi_plot + theme(legend.position = "none") + manual_label_plots[[4]])
+  combined_plot <- combined_plot / (deubi_plot + theme(legend.position = "none") + manual_label_plots[[5]])
+  for (i in seq_along(biomarkers)) {
+    combined_plot <- combined_plot / (biomarker_plots[[i]] + theme(legend.position = "none") + label_plots[[i]])
+  }
+  combined_plot <- combined_plot / (dend_plot + theme(legend.position = "none"))
+  
+  combined_legends <- (as_ggplot(legends$p1_legend) + theme(plot.margin = unit(c(50,50,0,20), "pt")) + coord_cartesian(clip = "off")) +
+    (as_ggplot(legends$p3_legend) + theme(plot.margin = unit(c(50,10,0,50), "pt")) + coord_cartesian(clip = "off")) +
+    (as_ggplot(legends$p2_legend) + theme(plot.margin = unit(c(70,20,0,80), "pt")) + coord_cartesian(clip = "off")) +
+    (as_ggplot(legends$p4_legend) + theme(plot.margin = unit(c(50,10,10,80), "pt")) + coord_cartesian(clip = "off")) /
+    (as_ggplot(legends$p5_legend) + theme(plot.margin = unit(c(50,10,0,80), "pt")) + coord_cartesian(clip = "off")) +
+    (as_ggplot(legends$p6_legend) + theme(plot.margin = unit(c(0,50,0,100), "pt")) + coord_cartesian(clip = "off")) +
+    plot_layout(nrow = 1, ncol = 6)
+  
+  final_plot <- combined_plot / (combined_legends + coord_cartesian(clip = "off")) +
+    plot_layout(nrow = length(biomarkers) + 7, ncol = 1, heights = c(rep(0.3, length(biomarkers) + 5), 2))
+  
+  return(final_plot)
+}
+```
+
 ## Session Info
 
 ```{r}

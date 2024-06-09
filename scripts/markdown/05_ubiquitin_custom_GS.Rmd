@@ -1192,9 +1192,9 @@ final_ub_db_df <- final_ub_db_pref %>%
   dplyr::filter(is_preferred | is.na(preferred_category)) %>%
   dplyr::select(-preferred_category, -is_preferred)  # Remove the helper columns
 
-# Save the ub_db in a csv file
-ub_db_csv_path <- file.path(results_ubgenesets_path, "ub_db.csv")
-write.csv(final_ub_db_df, file = ub_db_csv_path, row.names = TRUE)
+# Save the ub_db in an RDS file
+ub_db_csv_path <- file.path(results_ubgenesets_path, "ub_db.rds")
+saveRDS(final_ub_db_df, file = ub_db_csv_path)
 
 # # DEBUG
 # # Optionally, check how many rows were removed for each gene
@@ -1766,10 +1766,10 @@ missing_hsymbols <- is.na(lof_ub_binary$hugo_symbol)
 new_hsymbols <- ENSEMBLtoSYMBOL(lof_ub_binary$ensembl_id[missing_hsymbols])
 lof_ub_binary$hugo_symbol[missing_hsymbols] <- new_hsymbols
 
-# Save the lof_binary into a file
+# Save the lof_binary into an RDS file
 lof_ub_binary_out_path <- file.path(results_ubgenesets_path, 
-                      "lof_ub_binary.csv")
-write.csv(lof_ub_binary, file = lof_ub_binary_out_path, row.names = TRUE)
+                      "lof_ub_binary.rds")
+saveRDS(lof_ub_binary, file = lof_ub_binary_out_path)
 
 # Display
 datatable(lof_ub_binary, 
@@ -1792,6 +1792,10 @@ datatable(lof_ub_binary,
           ),
           caption = "Binary matrix of ubiquitin LoF mutations per sample."
         )
+```
+
+```{r}
+ub_db <- readRDS(file.path(results_ubgenesets_path, "ub_db.rds"))
 ```
 
 # Session Info

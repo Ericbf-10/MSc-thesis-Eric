@@ -361,6 +361,11 @@ annot_lof_df_ubiquitin <- cat_lof_df_ubiquitin %>%
   dplyr::left_join(response_df, by="sample_id") %>% 
   dplyr::distinct()
 
+# Save to RDS
+annot_lof_ub_path <- file.path(results_ubfora_path, 
+                      "annot_lof_ub.rds")
+saveRDS(annot_lof_df_ubiquitin, file = annot_lof_ub_path)
+
 # Responders
 r_lof_ub_df <- annot_lof_df_ubiquitin %>% 
   dplyr::filter(sample_id %in% r_sample_ids)
@@ -876,7 +881,6 @@ joined_ub_info <- final_ub_db_df %>%
 patients_ub_lof_mut_path <- file.path(results_ubfora_path, 
                       "lof_patients_ub_mutations.rds")
 saveRDS(joined_ub_info, file = patients_ub_lof_mut_path)
-mock_df <- readRDS(patients_ub_lof_mut_path)
 
 # Filter genes
 r_final_ub_db_df <- joined_ub_info %>% 

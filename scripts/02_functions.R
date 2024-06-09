@@ -20,6 +20,9 @@ library(ggnewscale)
 library(patchwork)
 library(ggpubr)
 library(cowplot)
+library(ggplot2)
+library(pheatmap)
+library(ggplotify)
 
 # Color blind friendly palette
 cbPalette <- c("#56B4E9", "#999999", "#8A2BE2", "#E69F00", "#D55E00", "#CC79A7", "#009E73", "#F0E442", "#0072B2", "#FF69B4", "#FFD700", "#000000", "#00CED1", "#4B0082")
@@ -171,7 +174,7 @@ searchGOTerms <- function(keyword) {
 }
 
 # Bar Plot that summarizes the mutation count for each patient
-sum_plot <- function(response_df, all_mut_df, nonsyn_mut_df, lof_mut_df, plot_path) {
+sum_plot <- function(response_df, all_mut_df, nonsyn_mut_df, lof_mut_df, plot_path, select_r = FALSE) {
   all_sample_ids <- unique(c(all_mut_df$sample_id, nonsyn_mut_df$sample_id, lof_mut_df$sample_id))
   
   # Prepare a combined_df
@@ -196,6 +199,16 @@ sum_plot <- function(response_df, all_mut_df, nonsyn_mut_df, lof_mut_df, plot_pa
   combined_data <- count_df %>%
     dplyr::left_join(response_df, by = "sample_id")
   
+  if (select_r) {
+    combined_data <- combined_data %>% 
+      dplyr::filter(patient_response == "R")
+    plot_title = "Number of mutations in Responders"
+  } else {
+    combined_data <- combined_data %>% 
+      dplyr::filter(patient_response == "NR")
+    plot_title = "Number of mutations in Non-responders"
+  }
+  
   # Define order R > NR
   response_order <- combined_data %>%
     dplyr::select(sample_id, patient_response) %>%
@@ -213,10 +226,9 @@ sum_plot <- function(response_df, all_mut_df, nonsyn_mut_df, lof_mut_df, plot_pa
                      dplyr::select(sample_id, order), by = "sample_id") %>% 
     dplyr::arrange(order, source) %>%
     dplyr::select(-order) %>% # Optionally remove the 'order' column if it's no longer needed
-    dplyr::mutate(facet_label = paste(sample_id, "-", patient_response)) %>%
     dplyr::mutate(sample_id = factor(sample_id, levels = unique(sample_id)))
   
-  ordered_data$facet_label <- factor(ordered_data$facet_label, levels = unique(ordered_data$facet_label))
+  # ordered_data$facet_label <- factor(ordered_data$facet_label, levels = unique(ordered_data$facet_label))
   
   # Calculate the maximum count and buffer again just in case
   max_count <- max(ordered_data$count, na.rm = TRUE)
@@ -226,12 +238,13 @@ sum_plot <- function(response_df, all_mut_df, nonsyn_mut_df, lof_mut_df, plot_pa
   bar_plot <- ggplot(ordered_data, aes(x = source, y = count, fill = source)) +
     geom_bar(stat = "identity", position = position_dodge()) +
     geom_text(aes(label = count), vjust = -0.5, position = position_dodge(0.9)) +
-    scale_fill_manual(values = c("All" = "darkblue", "Nonsyn" = "darkred", "LoF" = "darkgreen"),
-                      name = "Mutation Type") +
-    facet_wrap(~ facet_label, scales = "free_x") +
-    labs(x = "Mutation Type", 
-         y = "Count", 
-         title = "Number of mutations per patient") +
+    scale_fill_manual(values = c("All" = "#0072B2", "Nonsyn" = "#CC79A7", "LoF" = "#FFD700"),
+                      labels = c("All" = "All", "Nonsyn" = "Nonsynonymous", "LoF" = "Loss of Function"),
+                      name = "Mutation type") +
+    facet_wrap(~ sample_id, scales = "free_x") +
+    labs(x = NULL, 
+         y = "Mutation count", 
+         title = plot_title) +
     ylim(0, max_count + buffer) + # Adjust the y-axis to include the buffer
     theme_minimal() +
     theme(panel.background = element_rect(fill = "white", colour = "black"),
@@ -240,7 +253,7 @@ sum_plot <- function(response_df, all_mut_df, nonsyn_mut_df, lof_mut_df, plot_pa
           plot.title = element_text(hjust = 0.5)) # Attempt to visually center the title, though limitations exist
   
   # Save
-  ggsave(plot_path, bar_plot, width = 15, height = 15, dpi = 300)
+  ggsave(plot_path, bar_plot, width = 10, height = 8, dpi = 300)
   
   # Return
   return(bar_plot)
@@ -1186,8 +1199,25 @@ clustering_pfam <- function(mut_df, plot_path, fig_title, width, height) {
   return(tile_plot)
 }
 
+# Define the function to create a boxplot for a given biomarker
+create_biomarker_boxplot <- function(df, biomarker, response_col = "Response", fill_colors = c("R" = "#0072B2", "NR" = "#F0E442")) {
+  long_data <- df %>%
+    pivot_longer(cols = c(biomarker), 
+                 names_to = "Measurement", values_to = "Value")
+  
+  p <- ggplot(long_data, aes(x = Measurement, y = Value, fill = !!sym(response_col))) +
+    geom_boxplot() +
+    scale_fill_manual(values = fill_colors) +
+    labs(x = "Measurement", y = "Value", title = paste("Boxplot of", biomarker, "Faceted by Response")) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 0, hjust = 1))
+  
+  # Add p-values to the plot
+  p + stat_compare_means(aes(group = !!sym(response_col)), method = "t.test", label = "p.signif")
+}
+
 # Define biomarkers clustering order
-biomarkers_clustering_order <- function(df, biomarkers, response_col = "Response", sample_col = "SampleID") {
+biomarkers_clustering_order <- function(df, biomarkers, measure = "median", response_col = "Response", sample_col = "SampleID") {
   # Ensure the response column is a factor
   df <- df %>%
     mutate(!!sym(response_col) := as.factor(!!sym(response_col)),
@@ -1195,15 +1225,14 @@ biomarkers_clustering_order <- function(df, biomarkers, response_col = "Response
   
   # Calculate the median and categorize each biomarker
   for (biomarker in biomarkers) {
-    median_value <- median(df[[biomarker]], na.rm = TRUE)
     category_col <- paste0(biomarker, "_Category")
-    if (biomarker %in% c("Exclusion", "Dysfunction")) {
-      df <- df %>%
-        dplyr::mutate(!!sym(category_col) := ifelse(!!sym(biomarker) >= median_value, "low", "high"))
+    if (measure == "median") {
+      statistic_value <- median(df[[biomarker]], na.rm = TRUE)
     } else {
-      df <- df %>%
-        dplyr::mutate(!!sym(category_col) := ifelse(!!sym(biomarker) >= median_value, "high", "low")) 
+      statistic_value <- mean(df[[biomarker]], na.rm = TRUE)
     }
+    df <- df %>%
+      dplyr::mutate(!!sym(category_col) := ifelse(!!sym(biomarker) >= statistic_value, "high", "low"))
   }
   
   # Convert the categorical values to numerical for clustering
@@ -1221,7 +1250,28 @@ biomarkers_clustering_order <- function(df, biomarkers, response_col = "Response
   # Get the order of SampleID based on clustering
   sample_order <- df[[sample_col]][clustering$order]
   
-return(list("df_biomarkers_category" = df, "sample_order" = sample_order))
+return(list("df_biomarkers_category" = df, "sample_order" = sample_order, "clustering" = clustering))
+}
+
+# Function to make ubiquitination and deubiquitination categories plot (patchwork)
+make_ubi_annotation_plot <- function(df, var_name, fill_label, custom_labels) {
+  # Ensure the var_name column is a factor with levels 0 and 1
+  df[[var_name]] <- factor(df[[var_name]], levels = c(0, 1), labels = custom_labels)
+  
+  plot <- ggplot(df, aes_string(x = "SampleID", y = "1", fill = var_name)) +
+    geom_tile(color = "black", linewidth = 0.5) +
+    scale_y_continuous(expand = c(0, 0), breaks = NULL) +
+    scale_fill_manual(values = c("Present" = "darkgrey", "Absent" = "white"), na.value = "white") +
+    labs(x = NULL, y = NULL, fill = fill_label) +
+    theme_minimal() +
+    theme(axis.text.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          axis.text.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          legend.position = "right",
+          plot.margin = margin(0, 0, 0, 0, "pt"))
+  
+  return(plot)
 }
 
 # Function to make ecotype and tme categories plot (patchwork)
@@ -1236,7 +1286,8 @@ make_ecotyper_tme_annotation_plot <- function(df, var_name, fill_label, col_star
           axis.ticks.x = element_blank(),
           axis.text.y = element_blank(),
           axis.ticks.y = element_blank(),
-          legend.position = "right")
+          legend.position = "right",
+          plot.margin = margin(0, 0, 0, 0, "pt"))
   
   return(plot)
 }
@@ -1246,7 +1297,7 @@ make_biomarker_annotation_plot <- function(df, var_name, fill_label, show_sample
   plot <- ggplot(df, aes_string(x = "sample_id", y = "1", fill = var_name)) +
     geom_tile(color = "black", linewidth = 0.5) +
     scale_y_continuous(expand = c(0, 0), breaks = NULL) +
-    scale_fill_manual(values = c("high" = "green", "low" = "red"),
+    scale_fill_manual(values = c("high" = "#009E73", "low" = "#D55E00"),
                       labels = c("high" = "High", "low" = "Low")) +
     labs(x = NULL, y = NULL, fill = "Biomarker score") +
     theme_minimal() +
@@ -1254,7 +1305,8 @@ make_biomarker_annotation_plot <- function(df, var_name, fill_label, show_sample
           axis.ticks.x = element_blank(),
           axis.text.y = element_blank(),
           axis.ticks.y = element_blank(),
-          legend.position = ifelse(show_sample_id == TRUE, "right", "none"))
+          legend.position = ifelse(show_sample_id == TRUE, "right", "none"),
+          plot.margin = margin(0, 0, 0, 0, "pt")) +
   
   # Conditionally add sample ID labels
   if (show_sample_id) {
@@ -1268,20 +1320,33 @@ make_biomarker_annotation_plot <- function(df, var_name, fill_label, show_sample
 }
 
 # Define function to generate combined plot for all biomarkers
-make_combined_biomarker_plots <- function(df, biomarkers, ecotype_plot, tme_plot) {
-  # Generate clustering order
-  result <- biomarkers_clustering_order(df, biomarkers)
+make_combined_biomarker_plots <- function(df, biomarkers, ecotype_plot, tme_plot, ubi_plot, deubi_plot, dend_data) {
   
-  # Update the SampleID factor levels based on clustering order
-  df <- result$df_biomarkers_category %>%
-    dplyr::rename(patient_response = Response,
-                  sample_id = SampleID) %>% 
-    dplyr::mutate(sample_id = factor(sample_id, levels = result$sample_order))
+  # Create dendrogram
+  dend_plot <- ggplot() +
+    geom_segment(data = dend_data$segments, aes(x, y, xend = xend, yend = yend)) +
+    scale_y_reverse() +
+    coord_fixed(ratio = 1.45, expand = FALSE) + 
+    labs(x = NULL, 
+         y = NULL) +
+    theme_minimal() +
+    theme(axis.text.y = element_blank(),
+          axis.title.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          axis.text.x = element_blank(),
+          axis.title.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          plot.margin = unit(c(0, 12.2, 0, 0), "cm"))
+  
+  # Fix the width by using cowplot's plot_grid
+  dend_plot <- plot_grid(dend_plot, ncol = 1, rel_widths = c(0.1))
   
   # Create the response plot
   response_plot <- ggplot(df, aes(x = sample_id, y = "1", fill = patient_response)) +
     geom_tile(color = "black", linewidth = 0.5) +
-    scale_fill_manual(values = c("R" = "darkgreen", "NR" = "darkred"),
+    scale_fill_manual(values = c("R" = "#0072B2", "NR" = "#F0E442"),
                       labels = c("R" = "Responders", "NR" = "Non-responders")) +
     labs(x = NULL, 
          y = NULL,
@@ -1292,7 +1357,8 @@ make_combined_biomarker_plots <- function(df, biomarkers, ecotype_plot, tme_plot
           axis.ticks.x = element_blank(),
           axis.text.y = element_blank(),
           axis.ticks.y = element_blank(),
-          legend.position = "right")
+          legend.position = "right",
+          plot.margin = margin(0, 0, 0, 0, "pt"))
   
   # Create first label plot
   manual_label_plots <- list()
@@ -1304,6 +1370,12 @@ make_combined_biomarker_plots <- function(df, biomarkers, ecotype_plot, tme_plot
     theme(plot.margin = margin(0, 0, 0, 0, "pt"))
   manual_label_plots[[3]] <- ggdraw() + 
     draw_label("TME category", x = 0, hjust = 0, angle = 0, size = 12) +
+    theme(plot.margin = margin(0, 0, 0, 0, "pt"))
+  manual_label_plots[[4]] <- ggdraw() + 
+    draw_label("Ubi mutation", x = 0, hjust = 0, angle = 0, size = 12) +
+    theme(plot.margin = margin(0, 0, 0, 0, "pt"))
+  manual_label_plots[[5]] <- ggdraw() + 
+    draw_label("Deubi mutation", x = 0, hjust = 0, angle = 0, size = 12) +
     theme(plot.margin = margin(0, 0, 0, 0, "pt"))
   
   # Create plots for each biomarker
@@ -1323,25 +1395,332 @@ make_combined_biomarker_plots <- function(df, biomarkers, ecotype_plot, tme_plot
     p1_legend = get_legend(response_plot),
     p2_legend = get_legend(ecotype_plot),
     p3_legend = get_legend(tme_plot),
-    p4_legend = get_legend(biomarker_plots[[length(biomarkers)]])
+    p4_legend = get_legend(ubi_plot),
+    p5_legend = get_legend(deubi_plot),
+    p6_legend = get_legend(biomarker_plots[[length(biomarkers)]])
   )
   
   # Combine all plots
   combined_plot <- response_plot + theme(legend.position = "none") + manual_label_plots[[1]]
   combined_plot <- combined_plot / (ecotype_plot + theme(legend.position = "none") + manual_label_plots[[2]])
   combined_plot <- combined_plot / (tme_plot + theme(legend.position = "none") + manual_label_plots[[3]])
+  combined_plot <- combined_plot / (ubi_plot + theme(legend.position = "none") + manual_label_plots[[4]])
+  combined_plot <- combined_plot / (deubi_plot + theme(legend.position = "none") + manual_label_plots[[5]])
   for (i in seq_along(biomarkers)) {
     combined_plot <- combined_plot / (biomarker_plots[[i]] + theme(legend.position = "none") + label_plots[[i]])
   }
+  combined_plot <- combined_plot / (dend_plot + theme(legend.position = "none"))
   
-  combined_legends <- (as_ggplot(legends$p1_legend)) +
-    (as_ggplot(legends$p3_legend)) +
-    (as_ggplot(legends$p2_legend)) + 
-    (as_ggplot(legends$p4_legend)) +
-    plot_layout(nrow = 1, ncol = 4)
+  combined_legends <- (as_ggplot(legends$p1_legend) + theme(plot.margin = unit(c(50,50,0,20), "pt")) + coord_cartesian(clip = "off")) +
+    (as_ggplot(legends$p3_legend) + theme(plot.margin = unit(c(50,10,0,50), "pt")) + coord_cartesian(clip = "off")) +
+    (as_ggplot(legends$p2_legend) + theme(plot.margin = unit(c(70,20,0,80), "pt")) + coord_cartesian(clip = "off")) +
+    (as_ggplot(legends$p4_legend) + theme(plot.margin = unit(c(50,10,10,80), "pt")) + coord_cartesian(clip = "off")) /
+    (as_ggplot(legends$p5_legend) + theme(plot.margin = unit(c(50,10,0,80), "pt")) + coord_cartesian(clip = "off")) +
+    (as_ggplot(legends$p6_legend) + theme(plot.margin = unit(c(0,50,0,100), "pt")) + coord_cartesian(clip = "off")) +
+    plot_layout(nrow = 1, ncol = 6)
   
-  final_plot <- combined_plot / combined_legends +
-    plot_layout(nrow = length(biomarkers) + 5, ncol = 1, heights = c(rep(0.3, length(biomarkers) + 3), 2))
+  final_plot <- combined_plot / (combined_legends + coord_cartesian(clip = "off")) +
+    plot_layout(nrow = length(biomarkers) + 7, ncol = 1, heights = c(rep(0.3, length(biomarkers) + 5), 2))
   
   return(final_plot)
+}
+
+# Function to remove duplicate genes from the TPM matrix
+removeDuplicateGenesDF <- function(geneMatrix){
+  # From gene matrix with HGNC symbols
+  # The next three lines are for when making tpm to dataframe, that also changes gene names dash to dots and additionally adds numbers to duplicated genes.
+  genes <- rownames(geneMatrix)
+  geneMatrix <- geneMatrix %>% as.data.frame() %>% rownames_to_column(var="Gene")
+  if(!is.null(genes)){
+    geneMatrix$Gene <- genes
+    # Write gene expression matrix to tab-delimited file - TPM, AND annotation file
+    # Gene names should be unique.
+    geneMatrix.dedup <- IOBR::remove_duplicate_genes(eset = geneMatrix , column_of_symbol = "Gene", method = "mean")
+    geneMatrix.dedup
+  }else{
+    stop("No gene ids in the matrix as rownames, please provide gene expression matrix in correct format")
+  }
+}
+
+# Function to make a tile plot using pheatmap and patchwork for biomarkers, much cleaner and easier solution
+pheatmap_biomarkers <- function(df, numerical_biomarkers, categorical_biomarkers, response_col, ubi_counts = FALSE, split_response = FALSE){
+  
+  # Set row names
+  rownames(df) <- df$SampleID
+  df$SampleID <- NULL
+  
+  # Separate numerical and categorical data
+  numeric_data <- df %>% select(one_of(numerical_biomarkers))
+  ann_df <- df %>% select(!!sym(response_col), one_of(categorical_biomarkers))
+  ann_df$SampleID <- rownames(ann_df)
+  
+  # Get ubi data
+  if (ubi_counts) {
+    ubi_data <- df %>% select("ubi_counts", "deubi_counts")
+  } else {
+    ubi_data <- df %>% select("ubi_lof", "deubi_lof")
+  }
+  
+  # Merge
+  ann_df <- bind_cols(ann_df, ubi_data)
+  
+  # Normalize numerical data
+  normalized_data <- as.data.frame(lapply(numeric_data, function(x) (x - min(x)) / (max(x) - min(x))))
+  normalized_data$SampleID <- rownames(numeric_data)
+  
+  # Melt the normalized data for ggplot
+  melted_data <- melt(normalized_data, id.vars = "SampleID")
+  
+  # Convert to factors ann_df
+  ann_df <- ann_df %>% 
+    mutate(TME = as.factor(TME),
+           Ecotype = factor(Ecotype, levels = c(paste0("CE", 1:10), NA)),
+           !!sym(response_col) := as.factor(!!sym(response_col)))
+  
+  if (response_col == "resp_3_cat") {
+    ann_df <- ann_df %>% 
+      rename(Response = resp_3_cat)
+  }
+  
+  if (!ubi_counts) {
+    ann_df <- ann_df %>% 
+      rename(Ubiquitin_LoF = ubi_lof,
+             Deubiquitin_LoF = deubi_lof) %>% 
+      mutate(Ubiquitin_LoF = as.factor(as.character(Ubiquitin_LoF)),
+             Deubiquitin_LoF = as.factor(as.character(Deubiquitin_LoF)))
+  } else {
+    ann_df <- ann_df %>% 
+      rename(Ubiquitin_LoF_counts = ubi_counts,
+             Deubiquitin_LoF_counts = deubi_counts)
+  }
+  
+  # Add annotation bars
+  # For this example, we will use pheatmap to simplify annotation integration
+  # Define the initial categorical colors list
+  ann_colors <- list(
+    TME = c(D = "#FFD700", F = "#000000", IE = "#56B4E9", `IE/F` = "#0072B2"),
+    Ecotype = c(CE1 = "#E69F00", CE2 = "#CC79A7", CE3 = "#F0E442", CE4 = "#FF69B4", CE5 = "#009E73", CE6 = "#8A2BE2", CE7 = "#D55E00", CE8 = "#000000", CE9 = "#00CED1", CE10 = "#4B0082", "NA" = "lightgrey")
+  )
+  
+  # Conditionally add the Response colors
+  if (response_col == "Response") {
+    ann_colors$Response <- c(R = "#009E73", NR = "#D55E00")
+  } else if (response_col == "resp_3_cat") {
+    ann_colors$Response <- c(R = "#009E73", SD = "#8A2BE2", NR = "#D55E00")
+  }
+  
+  # Conditionally add the ubiquitin info
+  gradient_ubi <- colorRampPalette(c("white", "#FFD700"))(100)
+  gradient_deubi <- colorRampPalette(c("white", "#0072B2"))(100)
+  if (!ubi_counts) {
+    ann_colors$Ubiquitin_LoF <- c(`1` = "#FFD700", `0` = "white")
+    ann_colors$Deubiquitin_LoF <- c(`1` = "#0072B2", `0` = "white")
+  } else {
+    ann_colors$Ubiquitin_LoF_counts <- gradient_ubi
+    ann_colors$Deubiquitin_LoF_counts <- gradient_deubi
+  }
+  
+  # Plot heatmap with annotations
+  df.fin <- as.data.frame(as.matrix(normalized_data[, -ncol(normalized_data)]))
+  rownames(df.fin) <- ann_df$SampleID
+  ann_df$SampleID <- NULL
+  
+  # Transpose
+  df.fin.t <- t(df.fin)
+  
+  if (!split_response){
+    p <- pheatmap(df.fin.t, 
+             cluster_rows = FALSE, 
+             cluster_cols = TRUE, 
+             annotation_col = ann_df, 
+             annotation_colors = ann_colors,
+             show_rownames = TRUE, 
+             show_colnames = TRUE,
+             scale = "none", 
+             border_color = "black",
+             # legend_breaks = c(0, 0.5, 1, max(df.fin.t)),
+             # legend_labels = c("0", "0.5", "1", "title\n"),
+             angle_col = "45",
+             legend_breaks = c(0, 1),
+             legend_labels = c("Low", "High"),
+             color = colorRampPalette(c("#F0E442", "#0072B2"))(50))
+    return(p)
+  } else if (response_col == "Response") {
+    p.r <- pheatmap(df.fin.t %>% as.data.frame() %>% dplyr::select(all_of(ann_df %>% dplyr::filter(Response=="R") %>% rownames())) %>% as.matrix(), 
+                  cluster_rows = FALSE, 
+                  cluster_cols = TRUE, 
+                  annotation_col = ann_df %>% dplyr::filter(Response=="R"), 
+                  annotation_colors = ann_colors,
+                  show_rownames = TRUE, 
+                  show_colnames = TRUE,
+                  scale = "none", 
+                  border_color = "black",
+                  angle_col = "45",
+                  legend_breaks = c(0, 1),
+                  legend_labels = c("Low", "High"),
+                  color = colorRampPalette(c("#F0E442", "#0072B2"))(50)) %>% as.ggplot()
+    
+    p.nr <- pheatmap(df.fin.t %>% as.data.frame()%>% dplyr::select(all_of(ann_df %>% dplyr::filter(Response=="NR") %>% rownames())) %>% as.matrix(), 
+                     cluster_rows = FALSE, 
+                     cluster_cols = TRUE, 
+                     annotation_col = ann_df %>% dplyr::filter(Response=="NR"), 
+                     annotation_colors = ann_colors,
+                     show_rownames = TRUE, 
+                     show_colnames = TRUE,
+                     scale = "none", 
+                     border_color = "black",
+                     angle_col = "45",
+                     legend_breaks = c(0, 1),
+                     legend_labels = c("Low", "High"),
+                     color = colorRampPalette(c("#F0E442", "#0072B2"))(50)) %>% as.ggplot()
+    return(p.r +  p.nr)
+  } else {
+    p.r <- pheatmap(df.fin.t %>% as.data.frame() %>% dplyr::select(all_of(ann_df %>% dplyr::filter(Response=="R") %>% rownames())) %>% as.matrix(), 
+                    cluster_rows = FALSE, 
+                    cluster_cols = TRUE, 
+                    annotation_col = ann_df %>% dplyr::filter(Response=="R"), 
+                    annotation_colors = ann_colors,
+                    show_rownames = TRUE, 
+                    show_colnames = TRUE,
+                    scale = "none", 
+                    border_color = "black",
+                    angle_col = "45",
+                    legend_breaks = c(0, 1),
+                    legend_labels = c("Low", "High"),
+                    color = colorRampPalette(c("#F0E442", "#0072B2"))(50)) %>% as.ggplot()
+    
+    p.sd <- pheatmap(df.fin.t %>% as.data.frame() %>% dplyr::select(all_of(ann_df %>% dplyr::filter(Response=="SD") %>% rownames())) %>% as.matrix(), 
+                    cluster_rows = FALSE, 
+                    cluster_cols = TRUE, 
+                    annotation_col = ann_df %>% dplyr::filter(Response=="SD"), 
+                    annotation_colors = ann_colors,
+                    show_rownames = TRUE, 
+                    show_colnames = TRUE,
+                    scale = "none", 
+                    border_color = "black",
+                    angle_col = "45",
+                    legend_breaks = c(0, 1),
+                    legend_labels = c("Low", "High"),
+                    color = colorRampPalette(c("#F0E442", "#0072B2"))(50)) %>% as.ggplot()
+    
+    p.nr <- pheatmap(df.fin.t %>% as.data.frame()%>% dplyr::select(all_of(ann_df %>% dplyr::filter(Response=="NR") %>% rownames())) %>% as.matrix(), 
+                     cluster_rows = FALSE, 
+                     cluster_cols = TRUE, 
+                     annotation_col = ann_df %>% dplyr::filter(Response=="NR"), 
+                     annotation_colors = ann_colors,
+                     show_rownames = TRUE, 
+                     show_colnames = TRUE,
+                     scale = "none", 
+                     border_color = "black",
+                     angle_col = "45",
+                     legend_breaks = c(0, 1),
+                     legend_labels = c("Low", "High"),
+                     color = colorRampPalette(c("#F0E442", "#0072B2"))(50)) %>% as.ggplot()
+    return(p.r +  p.sd + p.nr)
+  }
+}
+
+library(ComplexHeatmap)
+library(circlize)
+library(dplyr)
+library(tidyr)
+
+# Function to make a tile plot using ComplexHeatmap for biomarkers
+complex_heatmap_biomarkers <- function(df, numerical_biomarkers, categorical_biomarkers, response_col, ubi_counts = FALSE, split_response = FALSE){
+  
+  # Set row names
+  rownames(df) <- df$SampleID
+  df$SampleID <- NULL
+  
+  # Separate numerical and categorical data
+  numeric_data <- df %>% select(one_of(numerical_biomarkers))
+  categorical_data <- df %>% select(!!sym(response_col), one_of(categorical_biomarkers))
+  categorical_data$SampleID <- rownames(categorical_data)
+  
+  # Get ubi data
+  if (ubi_counts) {
+    ubi_data <- df %>% select("ubi_counts", "deubi_counts")
+  } else {
+    ubi_data <- df %>% select("ubi_lof", "deubi_lof")
+  }
+  
+  # Normalize numerical data
+  normalized_data <- as.data.frame(lapply(numeric_data, function(x) (x - min(x)) / (max(x) - min(x))))
+  normalized_data$SampleID <- rownames(numeric_data)
+  
+  # Convert to factors categorical_data
+  categorical_data <- categorical_data %>% 
+    mutate(TME = as.factor(TME),
+           Ecotype = as.factor(Ecotype),
+           !!sym(response_col) := as.factor(!!sym(response_col)))
+  
+  cbPalette <- c("#56B4E9", "#999999", "#8A2BE2", "#E69F00", "#D55E00", "#CC79A7", "#009E73", "#F0E442", "#0072B2", "#FF69B4", "#FFD700", "#000000", "#00CED1", "#4B0082")
+  
+  # Define the initial categorical colors list
+  categorical_colors <- list(
+    TME = c(D = "#FFD700", F = "#000000", IE = "#56B4E9", `IE/F` = "#0072B2"),
+    Ecotyper = c(CE1 = "#E69F00", CE2 = "#CC79A7", CE3 = "#F0E442", CE4 = "#FF69B4", CE5 = "#009E73", CE6 = "#8A2BE2", CE7 = "#D55E00", CE8 = "#999999", CE9 = "#00CED1", CE10 = "#4B0082", "NA" = "white")
+  )
+  
+  # Conditionally add the Response colors
+  if (response_col == "Response") {
+    categorical_colors$Response <- c(R = "#009E73", NR = "#D55E00")
+  } else if (response_col == "resp_3_cat") {
+    categorical_colors$Response <- c(R = "#009E73", SD = "#8A2BE2", NR = "#D55E00")
+  }
+  
+  # Prepare annotation data for ComplexHeatmap
+  ha_col <- HeatmapAnnotation(
+    df = categorical_data,
+    col = categorical_colors
+  )
+  
+  # Prepare heatmap data
+  df.fin <- as.data.frame(as.matrix(normalized_data[, -ncol(normalized_data)]))
+  rownames(df.fin) <- categorical_data$SampleID
+  categorical_data$SampleID <- NULL
+  
+  # Transpose
+  df.fin.t <- t(df.fin)
+  
+  if (!split_response){
+    ht <- Heatmap(df.fin.t, 
+                  name = "Biomarker (norm)",
+                  top_annotation = ha_col,
+                  col = colorRamp2(c(0, 1), c("#F0E442", "#0072B2")),
+                  cluster_rows = FALSE, 
+                  cluster_columns = TRUE,
+                  show_row_names = TRUE,
+                  show_column_names = TRUE,
+                  border = TRUE,
+                  heatmap_legend_param = list(title = "Expression Level"))
+    draw(ht)
+  } else {
+    responder_samples <- rownames(categorical_data[categorical_data[[response_col]] == "R", ])
+    non_responder_samples <- rownames(categorical_data[categorical_data[[response_col]] == "NR", ])
+    
+    ht_r <- Heatmap(df.fin.t[, responder_samples], 
+                    name = "Biomarker (norm)",
+                    top_annotation = ha_col,
+                    col = colorRamp2(c(0, 1), c("darkgreen", "indianred")),
+                    cluster_rows = FALSE, 
+                    cluster_columns = TRUE,
+                    show_row_names = TRUE,
+                    show_column_names = TRUE,
+                    border = TRUE,
+                    heatmap_legend_param = list(title = "Expression Level"))
+    
+    ht_nr <- Heatmap(df.fin.t[, non_responder_samples], 
+                     name = "Biomarker (norm)",
+                     top_annotation = ha_col,
+                     col = colorRamp2(c(0, 1), c("darkgreen", "indianred")),
+                     cluster_rows = FALSE, 
+                     cluster_columns = TRUE,
+                     show_row_names = TRUE,
+                     show_column_names = TRUE,
+                     border = TRUE,
+                     heatmap_legend_param = list(title = "Expression Level"))
+    
+    draw(ht_r + ht_nr)
+  }
 }

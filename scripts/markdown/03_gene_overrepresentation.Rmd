@@ -74,14 +74,20 @@ sup1_response_path <- file.path(results_pc_path,
 
 # All
 maf_df_annotated <- read.csv(maf_df_path, header = TRUE)[ , -1]
+maf_df_annotated <- maf_df_annotated %>% 
+  dplyr::filter(!(sample_id %in% c("MM909_20", "MM909_24")))
 list_of_all_mutations <- split(maf_df_annotated, maf_df_annotated$sample_id
                                )
 # Nonsyn
 nonsyn_df_annotated <- read.csv(nonsyn_df_path, header = TRUE)[ , -1]
+nonsyn_df_annotated <- nonsyn_df_annotated %>% 
+  dplyr::filter(!(sample_id %in% c("MM909_20", "MM909_24")))
 list_of_nonsyn_mutations <- split(nonsyn_df_annotated, nonsyn_df_annotated$sample_id)
 
 # LoF
 lof_df_annotated <- read.csv(lof_df_path, header = TRUE)[ , -1]
+lof_df_annotated <- lof_df_annotated %>% 
+  dplyr::filter(!(sample_id %in% c("MM909_20", "MM909_24")))
 list_of_lof_mutations <- split(lof_df_annotated, lof_df_annotated$sample_id)
 
 # Get the list of patient IDs
@@ -111,13 +117,29 @@ boolean_gs_list <- paste(interesting_gs_list, collapse = " OR ") # This is to ge
 
 # Summary of mutations per patient
 
-```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=12}
+```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=8}
+# Responders sum plot
+
 # Define output path
 mm909_sum_plot_path <- file.path(figures_gor_path,
-                              "mm909_sum_plot.png")
+                              "mm909_sum_plot_r.png")
 
 # Summary plot
-mm909_sum_plot <- sum_plot(maf_df_annotated, nonsyn_df_annotated, lof_df_annotated, mm909_sum_plot_path)
+mm909_sum_plot <- sum_plot(response_df, maf_df_annotated, nonsyn_df_annotated, lof_df_annotated, mm909_sum_plot_path, select_r = TRUE)
+
+# Display
+print(mm909_sum_plot)
+```
+
+```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=8}
+# Non-responders sum plot
+
+# Define output path
+mm909_sum_plot_path <- file.path(figures_gor_path,
+                              "mm909_sum_plot_nr.png")
+
+# Summary plot
+mm909_sum_plot <- sum_plot(response_df, maf_df_annotated, nonsyn_df_annotated, lof_df_annotated, mm909_sum_plot_path, select_r = FALSE)
 
 # Display
 print(mm909_sum_plot)

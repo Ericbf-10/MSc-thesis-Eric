@@ -1,0 +1,278 @@
+========================================================================= 
+Log Path: session_info/log/MM909_MEL_TPM.log 
+Program Path: /Users/ericbf10/Desktop/ResistBiomarkersICI/scripts/main/resistance_hallmarks_calculation.R 
+Working Directory: /Users/ericbf10/Desktop/ResistBiomarkersICI 
+User Name: ericbf10 
+R Version: 4.3.2 (2023-10-31) 
+Machine: MacBook-Air-de-Eric.local x86_64 
+Operating System: Darwin 21.6.0 Darwin Kernel Version 21.6.0: Mon Feb 19 20:24:34 PST 2024; root:xnu-8020.240.18.707.4~1/RELEASE_X86_64 
+Base Packages: parallel grid stats4 stats graphics grDevices utils datasets methods base 
+Other Packages: pheatmap_1.0.12 IOBR_0.99.8 patchwork_1.2.0 pacman_0.5.1 easierData_1.8.0 SummarizedExperiment_1.32.0 MatrixGenerics_1.14.0 matrixStats_1.3.0 DEPTH2_1.0 PreMSIm_1.0 ImmuneSubtypeClassifier_0.1.0 plotROC_2.3.1 xgboost_1.7.7.1 ConsensusTME_0.0.1.9000 TMEscore_0.1.4 survminer_0.4.9 ggpubr_0.6.0 survival_3.6-4 EnsDb.Hsapiens.v75_2.99.0 org.Hs.eg.db_3.18.0 logr_1.3.8 common_1.1.3 immunedeconv_2.1.0 EPIC_1.1.7 EnvStats_2.8.1 qusage_2.36.0 reticulate_1.36.1 tictoc_1.2.1 limma_3.58.1 lubridate_1.9.3 forcats_1.0.0 stringr_1.5.1 purrr_1.0.2 readr_2.1.5 tidyr_1.3.1 tibble_3.2.1 ggplot2_3.5.1 tidyverse_2.0.0 data.table_1.15.4 dplyr_1.1.4 DT_0.33 extrafont_0.19 EnsDb.Hsapiens.v111_0.0.1 clusterProfiler_4.10.1 tidyHeatmap_1.8.1 ComplexHeatmap_2.18.0 ensembldb_2.26.0 AnnotationFilter_1.26.0 GenomicFeatures_1.54.4 AnnotationDbi_1.64.1 Biobase_2.62.0 GenomicRanges_1.54.1 GenomeInfoDb_1.38.8 IRanges_2.36.0 S4Vectors_0.40.2 AnnotationHub_3.10.1 BiocFileCache_2.10.2 dbplyr_2.5.0 BiocGenerics_0.48.1 
+Log Start Time: 2024-05-21 17:53:56.064624 
+========================================================================= 
+
+========================================================================= 
+Gathering and calculation of biomarkers of resistance: MM909_MEL_TPM 
+========================================================================= 
+
+>>Converting Ensembl to HGNC symbols and Entrez IDs..<< 
+
+>>Removing duplicates..<< 
+
+Warning: Unable to map 996 of 35725 requested IDs. 
+
+Warning: Unable to map 3 of 166 requested IDs. 
+
+Warning: Unable to map 996 of 35725 requested IDs. 
+
+Warning: Unable to map 3 of 166 requested IDs. 
+
+Warning: Unable to map 996 of 35725 requested IDs. 
+
+Warning: Unable to map 3 of 166 requested IDs. 
+
+Warning: Unable to map 996 of 35725 requested IDs. 
+
+Warning: Unable to map 3 of 166 requested IDs. 
+
+Warning: Unable to map 13948 of 35725 requested IDs. 
+
+Warning: Unable to map 5057 of 5057 requested IDs. 
+
+========================================================================= 
+Deconvolution: ESTIMATE 
+========================================================================= 
+
+[1] "Merged dataset includes 9533 genes (879 mismatched)."
+[1] "1 gene set: StromalSignature  overlap= 128"
+[1] "2 gene set: ImmuneSignature  overlap= 131"
+========================================================================= 
+Deconvolution: CIBERSORT 
+========================================================================= 
+
+========================================================================= 
+Deconvolution: consensusTME 
+========================================================================= 
+
+Warning: 6516 genes with constant expression values throughout the samples. 
+
+========================================================================= 
+(1-23/185): Gene expr. biomarkers 
+========================================================================= 
+
+ [1] "Some single-gene expression biomarkers are missing: ENSG00000197646"
+ [2] "Some single-gene expression biomarkers are missing: ENSG00000277027"
+ [3] "Some single-gene expression biomarkers are missing: ENSG00000198846"
+ [4] "Some single-gene expression biomarkers are missing: ENSG00000240065"
+ [5] "Some single-gene expression biomarkers are missing: ENSG00000105428"
+ [6] "Some single-gene expression biomarkers are missing: ENSG00000144583"
+ [7] "Some single-gene expression biomarkers are missing: ENSG00000155890"
+ [8] "Some single-gene expression biomarkers are missing: ENSG00000163098"
+ [9] "Some single-gene expression biomarkers are missing: ENSG00000198881"
+[10] "Some single-gene expression biomarkers are missing: ENSG00000204366"
+
+========================================================================= 
+Gene expr. signatures/scores biomarkers 
+========================================================================= 
+
+========================================================================= 
+(24-40/185): Immunophenoscore, EMT, TIS-GEP, Hypoxia, TLS, PASS_ON, CYT, VEFG, ImmunoScore (Roh), CIN 
+========================================================================= 
+
+Warning: ImmuneCytSignDavoli is computed with less than 30% of its genes 
+
+Warning: 15492 genes with constant expression values throughout the samples. 
+
+Warning: 6564 genes with constant expression values throughout the samples. 
+
+========================================================================= 
+(41/185): IPRES signature score 
+========================================================================= 
+
+Method used: ssgsea 
+
+IPRES_Hugo calculation is using 89.2% of signature genes 
+
+Genes missing for calculation of IPRES_Hugo: 
+
+  [1] "MXRA5"    "SNAI2"    "TMEM158"  "FZD2"     "MB21D2"   "GNG11"    "CIBAR1"   "EDN1"     "RHOB"     "CCN1"    
+ [11] "JUN"      "AGT"      "CCN5"     "PCDHB7"   "SOX9"     "ERBIN"    "PLAAT4"   "GJA1"     "SERPINE1" "PDCD1LG2"
+ [21] "MYCN"     "NGF"      "ADRA2A"   "PLPP1"    "KCTD11"   "IRAK2"    "RTN4RL1"  "MSTN"     "IGFBP4"   "PRRX2"   
+ [31] "SRF"      "SHB"      "SOX18"    "SOX17"    "PLPP3"    "JUNB"     "MEOX2"    "S100A9"   "CXCR1"    "THBD"    
+ [41] "DRD5"     "CCL8"     "PF4"      "CCL5"     "GP1BB"    "PTX3"     "CEBPB"    "S100A12"  "CCL11"    "FTL"     
+ [51] "CXCL8"    "BIK"      "EPO"      "FGF3"     "TRAM2"    "CKS2"     "H2AZ2"    "IRS2"     "KIF11"    "CST6"    
+ [61] "FOXF2"    "TRIM48"   "G0S2"     "DKK4"     "FOXG1"    "HAS2"     "ZNF22"    "SLC5A3"   "TMEM47"   "CHST2"   
+ [71] "TREML2"   "CST7"     "ADGRG2"   "KCTD12"   "NES"      "ADGRE2"   "SFRP2"    "ADAMTS5"  "TMEM217"  "FGF18"   
+ [81] "HSPA6"    "CCN2"     "S1PR1"    "FOXC2"    "EGR1"     "SESN2"    "RAB3B"    "CRIPTO"   "PROK1"    "ECSCR"   
+ [91] "ATP5IF1"  "LBP"      "CNR2"     "BMP6"     "NECTIN2"  "GZMA"     "SOX11"    "MAN1A1"   "PCLAF"    "TRAC"    
+[101] "CEMIP"    "DSC2"     "FCMR"     "MAFB"     "TARP"     "RGS16"    "GPR183"   "GPR65"    "CCN4"     "CXCL10"  
+[111] "FYB1"     "MMP12"    "CCR1"     "IGL"      "CXCL9"    "BPNT2"    "MMP1"     "CH25H"    "IRAG2"    "PPBP"    
+[121] "CXCL5"    "IL1A"     "CLC"      "MS4A6E"   "TMSB15A"  "TCIM"     "DEFB4A"   "LVRN"     "TMEFF1"   "DSEL"    
+[131] "CPXM1"    "PI3"      "MS4A7"    "RNASE2"   "HLA-DRB4" "GSDME"    "ISM1"     "GUCY1A1"  "MTCL1"    "UBE2QL1" 
+[141] "IBSP"     "HDGFL3"   "GAS1"     "TAFA5"    "ANOS1"    "PRELP"    "ARMCX1"   "MAGEH1"   "CARMN"    "IER5L"   
+[151] "SEPTIN11" "FGFBP1"   "SLC49A4"  "UBD"      "HTR2B"    "GSTT1"    "STK26"   
+
+-*---*--*--*---*- 
+
+Warning: 6516 rows with constant values throughout the samples. 
+
+ssGSEA score calculation method: mean 
+
+Scaling data after GSVA 
+
+========================================================================= 
+(42-46/185): TIDE score 
+========================================================================= 
+
+========================================================================= 
+(55/185): IMPRES (Immunopredictive) score 
+========================================================================= 
+
+IMPRES score calculation is using 86.7% of signature genes 
+
+Genes missing for calculation of IMPRES score: 
+
+[1] "TNFSF9" "VSIR"  
+
+-*---*--*--*---*- 
+
+========================================================================= 
+(57-86/185): MFP (molecular functional tumor portrait) 
+========================================================================= 
+
+========================================================================= 
+(87/185): APM score (antigen-presenting machinery) 
+========================================================================= 
+
+APM score (Senb) calculation is using 100% of signature genes 
+
+Method used: ssgsea 
+
+APM_Senb calculation is using 100% of signature genes 
+
+Warning: 6516 rows with constant values throughout the samples. 
+
+ssGSEA score calculation method: mean 
+
+========================================================================= 
+(88/185): IP score (Immunoproteasome) 
+========================================================================= 
+
+IP score (Immunoproteasome) calculation is using 100% of signature genes 
+
+Method used: mean 
+
+========================================================================= 
+(89/185): MIAS score (MHC-I association immunoscore) 
+========================================================================= 
+
+MIAS (Wu) calculation is using 91% of signature genes 
+
+Genes missing for calculation of MIAS (Wu): 
+
+[1] "PDCD1LG2" "SOCS1"    "HLA-DRB5" "HLA-DQA2" "UBD"      "CEBPA"    "KIR2DL3"  "FYB1"     "CD1D"    
+
+-*---*--*--*---*- 
+
+Method used: ssgsea 
+
+MIAS calculation is using 91% of signature genes 
+
+Genes missing for calculation of MIAS: 
+
+[1] "PDCD1LG2" "SOCS1"    "HLA-DRB5" "HLA-DQA2" "UBD"      "CEBPA"    "KIR2DL3"  "FYB1"     "CD1D"    
+
+-*---*--*--*---*- 
+
+Warning: 6516 rows with constant values throughout the samples. 
+
+ssGSEA score calculation method: mean 
+
+========================================================================= 
+(91/185): EcoTyper 
+========================================================================= 
+
+========================================================================= 
+(93/185): T cell exhaustion and dysfunction (Tex) score - Wu 
+========================================================================= 
+
+Tex score (T cell exhaustion and dysfunction score) calculation is using 100% of signature genes 
+
+Method used: weighted sum 
+
+========================================================================= 
+(95/185): APMS score - Thomson 
+========================================================================= 
+
+APMS (Thomson) signature calculation is using 100% of signature genes 
+
+Method used: zscore 
+
+Warning: NaNs produced 
+
+========================================================================= 
+(96/185): IP.subunit score -Kalaora 
+========================================================================= 
+
+IP subunit expression calculation is using 100% of signature genes 
+
+Method used: sum 
+
+========================================================================= 
+(97/185): Immune Cytolytic score - Davoli 
+========================================================================= 
+
+========================================================================= 
+(98/185): T cell anergy-hyporesponsiveness (Karasarides) 
+========================================================================= 
+
+T cell Anergy calculation is using 90.9% of signature genes 
+
+Genes missing for calculation of T cell Anergy: 
+
+DUSP1 
+
+-*---*--*--*---*- 
+
+Method used: ssgsea 
+
+Tcell_anergy calculation is using 90.9% of signature genes 
+
+Genes missing for calculation of Tcell_anergy: 
+
+DUSP1 
+
+-*---*--*--*---*- 
+
+Warning: 6516 rows with constant values throughout the samples. 
+
+ssGSEA score calculation method: mean 
+
+========================================================================= 
+(99-123/185): Tumor Immunophenotype Profiling (TIP) signatures involved in Cancer immunity cycle 
+========================================================================= 
+
+========================================================================= 
+(125-151/185): Deconvolution results 
+========================================================================= 
+
+========================================================================= 
+(152/185): Microsatellite instability (PreMSIm) 
+========================================================================= 
+
+========================================================================= 
+(155/185): Intratumoral heterogeneity (DEPTH2) 
+========================================================================= 
+
+========================================================================= 
+Calculation of biomarkers of resistance FINISHED 
+========================================================================= 
+
+========================================================================= 
+Total number of biomarkers calculated: 251 
+========================================================================= 
+
+========================================================================= 
+Log End Time: 2024-05-21 18:09:58.843484 
+Log Elapsed Time: 0 00:16:02 
+========================================================================= 
