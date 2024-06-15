@@ -19,48 +19,14 @@ output:
 # Load data
 
 ```{r, message=FALSE, warning=FALSE}
-### Load required libraries
-library(readxl)
-library(tidyverse)
-library(purrr)
-library(dplyr)
-library(knitr)
-library(DT)
-library(httr)
-library(jsonlite)
-library(stringr)
-library(AnnotationDbi)
-library(limma)
-
-### Load functions
+### Load packages, functions and paths
+source(file = "../01_install.R")
 source(file = "../02_functions.R")
-
-### Define paths
-current_dir <- getwd()
-
-# Results
-results_pc_path <- file.path(current_dir,
-                              "../../results/patient_characteristics/output")
-
-results_fip_path <- file.path(current_dir,
-                              "../../results/somatic_mutation_analysis/functional_impact_prediction/output")
-
-# Create the folder if it does not exist
-if(!file.exists(results_fip_path)) {
-  dir.create(results_fip_path, recursive = TRUE)
-}
-
-figures_fip_path <- file.path(current_dir, 
-                                 "../../results/somatic_mutation_analysis/functional_impact_prediction/figures")
-
-# Create the folder if it does not exist
-if(!file.exists(figures_fip_path)) {
-  dir.create(figures_fip_path, recursive = TRUE)
-}
+source(file = "../03_paths.R")
 
 # MAF-like file
-maf_data <- "../../data/_raw/41467_2017_1460_MOESM6_ESM_somatic_mutations.xlsx"
-maf_path <- file.path(current_dir, 
+maf_data <- "41467_2017_1460_MOESM6_ESM_somatic_mutations.xlsx"
+maf_path <- file.path(data_path, 
                       maf_data)
 # Sup1 data
 sup1_response_path <- file.path(results_pc_path, 
@@ -203,7 +169,7 @@ maf_df_anno_path <- file.path(results_fip_path, "maf_df_annotated.rds")
 saveRDS(maf_df_annotated, maf_df_anno_path)
 ```
 
-There is a "problem" here: some Entrez IDs are mapped to several Ensembl Gene IDs. I need to resolve this because otherwise it will impact the TMB calculation and possibly other analyses. I decided to keep the first Ensembl Gene ID that appears in the table for equal rows.
+There is a "problem" here: some Entrez IDs are mapped to several Ensembl Gene IDs. I need to resolve this because otherwise it will impact the TMB calculation and possibly other analyses. I decided to keep the first Ensembl Gene ID that is mapped.
 
 # Get a list of mutations for each patient
 
@@ -255,8 +221,8 @@ api_input <- nonsyn_maf_df %>%
                           sep = " "))
 
 ### Export the info to a file and use the Web VEP
-vep_input_data <- "../../data/vep_input_nonsyn_grch37.txt"
-vep_file_path <- file.path(current_dir, 
+vep_input_data <- "../vep_input_nonsyn_grch37.txt"
+vep_file_path <- file.path(data_path, 
                       vep_input_data)
 write.table(api_input$API_info, file = vep_file_path, row.names = FALSE, col.names = FALSE, quote = FALSE)
 ```
@@ -265,8 +231,8 @@ write.table(api_input$API_info, file = vep_file_path, row.names = FALSE, col.nam
 
 ```{r, message=FALSE, warning=FALSE}
 ### Define path
-vep_out_data <- "../../data/vep_output_nonsyn_grch37_06.txt"
-vep_path <- file.path(current_dir,
+vep_out_data <- "../vep_output_nonsyn_grch37.txt"
+vep_path <- file.path(data_path,
                       vep_out_data)
 
 ### Read data
@@ -292,7 +258,7 @@ vep_df_clean <- vep_df %>%
 
 The columns that **do not have any information** are: `r toString(setdiff(colnames(vep_df), colnames(vep_df_clean)))`
 
-The consideration of LoF mutations has been made in a "liberal" manner, meaning that if either SIFT or PolyPhen scores indicated the mutation to be deleterious, the mutation was considered LoF. In other words, both metrics did not have to be in agreement to consider a mutation LoF.
+The consideration of LoF mutations has been made in a "liberal" manner, meaning that if either SIFT or PolyPhen scores indicated the mutation to be deleterious, the mutation was considered LoF. Both metrics did not have to be in agreement to consider a mutation LoF.
 
 # Get a list of LoF mutations per patient
 
@@ -311,14 +277,19 @@ write.csv(lof_vep_df, file = lof_vep_out_path, row.names = TRUE)
 
 lof_vep_df_reduced <- lof_vep_df %>% 
   dplyr::rename(hugo_symbol = SYMBOL) %>% 
-  dplyr::select(sample_id, ensembl_id, entrez_id, hugo_symbol, Location, Allele, Liberal_consequence) %>% 
-  dplyr::distinct()
+  dplyr::select(sample_id, ensembl_id, entrez_id, hugo_symbol, Location, Allele, Liberal_consequence)
   
 # Save the lof_vep_df_reduced into a file
 lof_vep_reduced_out_path <- file.path(results_fip_path, 
                       "lof_mutations_reduced.csv")
 write.csv(lof_vep_df_reduced, file = lof_vep_reduced_out_path, row.names = TRUE)
 ```
+
+<!-- ```{r} -->
+<!-- # Create the new column 'joined_pos' to check if using distinct to reduce lof_vep_df is possible -->
+<!-- nonsyn_mock <- nonsyn_maf_df %>% -->
+<!--   mutate(joined_pos = paste0(sample_id, "-", Chromosome, ":", Start_position, "-", End_position)) -->
+<!-- ``` -->
 
 # Calculate TMB per patient
 
@@ -361,43 +332,43 @@ datatable(tmb_df,
         )
 ```
 
-# Create binary matrices (Nonsyn and LoF)
+<!-- # Create binary matrices (Nonsyn and LoF) -->
 
-```{r, message=FALSE, warning=FALSE}
-# ### Nonsyn df
-# nonsyn_binary <- nonsyn_maf_df %>%
-#   mutate(Liberal_consequence_binary = ifelse(Liberal_consequence == "deleterious", 1, 0)) %>%
-#   select(sample_id, Gene, SYMBOL, Liberal_consequence_binary) %>% 
-#   distinct() %>% 
-#   group_by(Gene, SYMBOL) %>%
-#   pivot_wider(names_from = sample_id,
-#               values_from = Liberal_consequence_binary,
-#               values_fill = list(Liberal_consequence_binary = 0))  # Correctly fills missing values with 0
-# 
-# # Save the lof_binary into a file
-# lof_binary_out_path <- file.path(current_dir, 
-#                       "../../data/lof_binary.csv")
-# write.csv(lof_binary, file = lof_binary_out_path, row.names = TRUE)
-# 
-# head(lof_binary)
+<!-- ```{r, message=FALSE, warning=FALSE} -->
+<!-- # ### Nonsyn df -->
+<!-- # nonsyn_binary <- nonsyn_maf_df %>% -->
+<!-- #   mutate(Liberal_consequence_binary = ifelse(Liberal_consequence == "deleterious", 1, 0)) %>% -->
+<!-- #   select(sample_id, Gene, SYMBOL, Liberal_consequence_binary) %>%  -->
+<!-- #   distinct() %>%  -->
+<!-- #   group_by(Gene, SYMBOL) %>% -->
+<!-- #   pivot_wider(names_from = sample_id, -->
+<!-- #               values_from = Liberal_consequence_binary, -->
+<!-- #               values_fill = list(Liberal_consequence_binary = 0))  # Correctly fills missing values with 0 -->
+<!-- #  -->
+<!-- # # Save the lof_binary into a file -->
+<!-- # lof_binary_out_path <- file.path(current_dir,  -->
+<!-- #                       "../../data/lof_binary.csv") -->
+<!-- # write.csv(lof_binary, file = lof_binary_out_path, row.names = TRUE) -->
+<!-- #  -->
+<!-- # head(lof_binary) -->
 
-### LoF df
-lof_binary <- lof_vep_df %>%
-  dplyr::mutate(Liberal_consequence_binary = ifelse(Liberal_consequence == "deleterious", 1, 0)) %>%
-  dplyr::select(sample_id, ensembl_id, SYMBOL, Liberal_consequence_binary) %>% 
-  dplyr::distinct() %>% 
-  dplyr::group_by(ensembl_id, SYMBOL) %>%
-  pivot_wider(names_from = sample_id,
-              values_from = Liberal_consequence_binary,
-              values_fill = list(Liberal_consequence_binary = 0))  # Correctly fills missing values with 0
+<!-- ### LoF df -->
+<!-- lof_binary <- lof_vep_df %>% -->
+<!--   dplyr::mutate(Liberal_consequence_binary = ifelse(Liberal_consequence == "deleterious", 1, 0)) %>% -->
+<!--   dplyr::select(sample_id, ensembl_id, SYMBOL, Liberal_consequence_binary) %>%  -->
+<!--   dplyr::distinct() %>%  -->
+<!--   dplyr::group_by(ensembl_id, SYMBOL) %>% -->
+<!--   pivot_wider(names_from = sample_id, -->
+<!--               values_from = Liberal_consequence_binary, -->
+<!--               values_fill = list(Liberal_consequence_binary = 0))  # Correctly fills missing values with 0 -->
 
-# Save the lof_binary into a file
-lof_binary_out_path <- file.path(results_fip_path, 
-                      "lof_binary.csv")
-write.csv(lof_binary, file = lof_binary_out_path, row.names = TRUE)
+<!-- # Save the lof_binary into a file -->
+<!-- lof_binary_out_path <- file.path(results_fip_path,  -->
+<!--                       "lof_binary.csv") -->
+<!-- write.csv(lof_binary, file = lof_binary_out_path, row.names = TRUE) -->
 
-head(lof_binary)
-```
+<!-- head(lof_binary) -->
+<!-- ``` -->
 
 # Plots
 
@@ -410,9 +381,9 @@ nonsyn_plot_path <- file.path(figures_fip_path,
 
 # Count the occurrences of each unique value in Variant_Classification
 top_variants <- nonsyn_maf_df %>%
-  count(Variant_Classification, name = "frequency") %>%
-  mutate(true_frequency = frequency / sum(frequency)) %>% 
-  arrange(desc(true_frequency))
+  dplyr::count(Variant_Classification, name = "frequency") %>%
+  dplyr::mutate(true_frequency = frequency / sum(frequency)) %>% 
+  dplyr::arrange(desc(true_frequency))
 
 # Create a bar plot
 nonsyn_plot <- ggplot(top_variants, aes(x = reorder(Variant_Classification,
@@ -450,10 +421,10 @@ lof_SIFT_plot_path <- file.path(figures_fip_path,
 
 # Count the occurrences of each unique value in Consequence and calculate the true frequency
 top_SIFT_lof_variants <- lof_vep_df %>%
-  count(SIFT_cleaned, name = "frequency") %>%
-  mutate(true_frequency = frequency / sum(frequency)) %>%
-  arrange(desc(true_frequency)) %>%
-  slice_max(order_by = true_frequency, n = 5)
+  dplyr::count(SIFT_cleaned, name = "frequency") %>%
+  dplyr::mutate(true_frequency = frequency / sum(frequency)) %>%
+  dplyr::arrange(desc(true_frequency)) %>%
+  dplyr::slice_max(order_by = true_frequency, n = 5)
 
 # Create a bar plot with the true frequency
 lof_SIFT_plot <- ggplot(top_SIFT_lof_variants, aes(x = reorder(SIFT_cleaned, 
@@ -491,10 +462,10 @@ lof_PolyPhen_plot_path <- file.path(figures_fip_path,
 
 # Count the occurrences of each unique value in Consequence and calculate the true frequency
 top_PolyPhen_lof_variants <- lof_vep_df %>%
-  count(PolyPhen_cleaned, name = "frequency") %>%
-  mutate(true_frequency = frequency / sum(frequency)) %>%
-  arrange(desc(true_frequency)) %>%
-  slice_max(order_by = true_frequency, n = 5)
+  dplyr::count(PolyPhen_cleaned, name = "frequency") %>%
+  dplyr::mutate(true_frequency = frequency / sum(frequency)) %>%
+  dplyr::arrange(desc(true_frequency)) %>%
+  dplyr::slice_max(order_by = true_frequency, n = 5)
 
 # Create a bar plot with the true frequency
 lof_PolyPhen_plot <- ggplot(top_PolyPhen_lof_variants, aes(x = reorder(PolyPhen_cleaned, 
@@ -526,8 +497,7 @@ ggsave(lof_PolyPhen_plot_path, lof_PolyPhen_plot, width = 10, height = 8, dpi = 
 ## Box plot of TMB grouped by response
 
 ```{r, message=FALSE, warning=FALSE}
-# Load ggpubr
-library(ggpubr)
+#Fig2a
 
 # Merge sup1_response with tmb_df
 tmb_response_df <- tmb_df %>% 
@@ -557,7 +527,7 @@ tmb_boxplot <- ggplot(tmb_response_df, aes(x = patient_response,
   geom_boxplot() +
   stat_summary(fun = median, geom = "text", aes(label = round(..y.., 2)), 
                position = position_nudge(x = 0, y = 1.5), size = 4, color = "white") +
-  stat_compare_means(method = "wilcox.test", label = "p.signif", label.x = 1.5) +  # Add p-value from Mann-Whitney test
+  stat_compare_means(method = "wilcox.test", label = "p.format", label.x = 1.5) +  # Add p-value from Mann-Whitney test
   scale_fill_manual(values = c(R = "#009E73", NR = "#D55E00"),
                     labels = c("R" = "Responders", "NR" = "Non-responders")) +
   scale_x_discrete(labels = c("NR" = "Non-responders", 
@@ -569,9 +539,9 @@ tmb_boxplot <- ggplot(tmb_response_df, aes(x = patient_response,
     panel.grid.minor = element_blank(),
     plot.background = element_rect(fill = "white", colour = NA)
   ) +
-  labs(title = "TMB by Patient Response",
+  labs(title = NULL,
        x = "Patient Response",
-       y = "Tumor Mutational Burden (TMB)",
+       y = "TMB (mutations/Mb)",
        fill = "Patient Response")
 
 # Print plot
@@ -581,19 +551,86 @@ print(tmb_boxplot)
 ggsave(tmb_boxplot_path, tmb_boxplot, width = 8, height = 6, dpi = 300)
 ```
 
-# MAFtools
-
-## Loading data
+## Box plot of LoF mutations grouped by response
 
 ```{r, message=FALSE, warning=FALSE}
-library(maftools)
+#Fig5
 
+# Merge sup1_response with lof_vep_df_reduced
+lof_response_df <- lof_vep_df_reduced %>% 
+  left_join(sup1_response_df %>% 
+            dplyr::select(Sample.ID, Patient.Response),
+            by = c("sample_id" = "Sample.ID")
+  ) %>% 
+  dplyr::filter(!(sample_id %in% c("MM909_20", "MM909_24"))) %>% 
+  dplyr::rename(patient_response = Patient.Response)
+
+# Calculate the sum of mutations for each sample
+lof_counts <- lof_response_df %>%
+  group_by(sample_id) %>%
+  summarise(lof_count = n()) %>%
+  ungroup()
+
+# Join the lof_count back to the original data frame
+lof_count_response_df <- lof_response_df %>%
+  left_join(lof_counts, by = "sample_id") %>% 
+  dplyr::select(sample_id, patient_response, lof_count) %>% 
+  dplyr::distinct()
+
+# Perform the Mann-Whitney test and extract p-value
+test_result <- compare_means(lof_count ~ patient_response, data = lof_count_response_df, method = "wilcox.test", p.adjust.method = "none")
+
+# Print the test result to see the p-value
+print(test_result)
+
+# Define output path
+lof_boxplot_path <- file.path(figures_fip_path, 
+                           "lof_boxplot.png")
+
+# Create a boxplot with medians and p-value displayed
+lof_boxplot <- ggplot(lof_count_response_df, aes(x = patient_response, 
+                                           y = lof_count, 
+                                           fill = patient_response)) +
+  geom_boxplot() +
+  stat_summary(fun = median, geom = "text", aes(label = round(..y.., 2)), 
+               position = position_nudge(x = 0, y = 18), size = 4, color = "white") +
+  stat_compare_means(method = "wilcox.test", label = "p.format", label.x = 1.5) +  # Add p-value from Mann-Whitney test
+  scale_fill_manual(values = c(R = "#009E73", NR = "#D55E00"),
+                    labels = c("R" = "Responders", "NR" = "Non-responders")) +
+  scale_x_discrete(labels = c("NR" = "Non-responders", 
+                              "R" = "Responders")) +  # Manually set x-axis labels
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", colour = "black"),
+    panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+    panel.grid.minor = element_blank(),
+    plot.background = element_rect(fill = "white", colour = NA)
+  ) +
+  labs(title = NULL,
+       x = "Patient Response",
+       y = "nº LoF mutations",
+       fill = "Patient Response")
+
+# Print plot
+print(lof_boxplot)
+
+# Save plot
+ggsave(lof_boxplot_path, lof_boxplot, width = 8, height = 6, dpi = 300)
+```
+
+# MAFtools
+
+## All mutations
+
+### Load data
+
+```{r, message=FALSE, warning=FALSE}
 # Define paths
-maf_data <- "../../data/_raw/41467_2017_1460_MOESM6_ESM_somatic_mutations.xlsx"
-maf_path <- file.path(current_dir, 
+maf_data <- "41467_2017_1460_MOESM6_ESM_somatic_mutations.xlsx"
+maf_path <- file.path(data_path, 
                       maf_data)
-clinical_data <- "../../data/_raw/41467_2017_1460_MOESM4_ESM_clinical.xlsx"
-clinical_path <- file.path(current_dir, 
+clinical_data <- "41467_2017_1460_MOESM4_ESM_clinical.xlsx"
+clinical_path <- file.path(data_path, 
                       clinical_data)
 
 # Read data
@@ -637,7 +674,7 @@ maf_df_annotated <- maf_df_annotated %>%
 mm909 = read.maf(maf = maf_df_annotated, clinicalData = clinical_resp_df)
 ```
 
-## Summaries
+### Summaries
 
 ```{r, message=FALSE, warning=FALSE}
 ## Shows sample summry.
@@ -657,9 +694,11 @@ getFields(mm909)
 write.mafSummary(maf = mm909, basename = file.path(results_fip_path, 'mm909'))
 ```
 
-## Visualization
+### Visualization
 
 ```{r, message=FALSE, warning=FALSE}
+# Fig3
+
 # Define output path
 plot_path1 <- file.path(figures_fip_path, "maf_summary.png")
 
@@ -676,21 +715,11 @@ knitr::include_graphics(plot_path1)
 ```
 
 ```{r}
-library(maftools)
-
 # Get the summary of mutations per sample
 sample_summary <- getSampleSummary(mm909)
 
 # View the sample summary to understand the data structure
 print(sample_summary)
-
-# Extract and count the total SNPs and DNPs
-total_snps <- sum(sample_summary$SNP)
-total_dnps <- sum(sample_summary$DNP)
-
-# Print the results
-cat("Total SNPs:", total_snps, "\n")
-cat("Total DNPs:", total_dnps, "\n")
 ```
 
 ```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=8}
@@ -720,7 +749,7 @@ sample_id_colors = list(Sample_ID = sample_colors)
 print(response_colors)
 
 # Generate plot
-oncoplot(maf = mm909, top = 50, drawColBar = FALSE, clinicalFeatures = c('Patient_Response', 'Sample_ID'), sortByAnnotation = TRUE, annotationColor = c(response_colors, sample_id_colors), anno_height = 0.25, legend_height = 1)
+oncoplot(maf = mm909, top = 50, drawColBar = FALSE, clinicalFeatures = c('Patient_Response'), sortByAnnotation = TRUE, annotationColor = response_colors, anno_height = 0.25, legend_height = 1)
 
 # Close the device
 dev.off()
@@ -738,25 +767,143 @@ plotTiTv(res = mm909.titv)
 mm909.mutload = tcgaCompare(maf = mm909, cohortName = 'Example-mm909', logscale = TRUE, capture_size = 50)
 ```
 
-## Explore shared mutated genes
+## LoF mutations
+
+### Load data
+
+```{r, message=FALSE, warning=FALSE}
+# Filter for LoF mutations
+lof_vep_maf <- lof_vep_df_reduced %>% 
+  separate(Location, into = c("Chromosome", "Position"), sep = ":", convert = TRUE) %>%
+  separate(Position, into = c("Start_position", "End_position"), sep = "-", convert = TRUE) %>% 
+  dplyr::rename(alt_allele = Allele)
+
+# Rename
+maf_df_annotated2 <- maf_df_annotated %>% 
+  dplyr::rename(sample_id = Sample_ID)
+
+# Filter maf_df_annotated based on matching rows in lof_vep_df_reduced
+lof_maf_df <- maf_df_annotated2 %>%
+  semi_join(lof_vep_maf, by = c("sample_id", "ensembl_id", "entrez_id", "Chromosome", "Start_position", "End_position", "alt_allele"))
+
+# Load maf with clinical data
+mm909 = read.maf(maf = lof_maf_df, clinicalData = clinical_resp_df)
+```
+
+### Summaries
+
+```{r, message=FALSE, warning=FALSE}
+## Shows sample summry.
+sample_sum <- getSampleSummary(mm909)
+getSampleSummary(mm909)
+
+## Shows gene summary.
+getGeneSummary(mm909)
+
+## Shows clinical data associated with samples
+getClinicalData(mm909)
+
+## Shows all fields in MAF
+getFields(mm909)
+
+## Writes maf summary to an output file with basename mm909
+write.mafSummary(maf = mm909, basename = file.path(results_fip_path, 'mm909_lof'))
+```
+
+### Visualization
+
+```{r, message=FALSE, warning=FALSE}
+# Define output path
+plot_path1 <- file.path(figures_fip_path, "maf_lof_summary.png")
+
+# Open a PNG device
+png(filename = plot_path1, width = 3000, height = 1600, res = 300)
+
+# Generate the plot
+plotmafSummary(maf = mm909, rmOutlier = TRUE, addStat = 'median', dashboard = TRUE, titvRaw = FALSE)
+
+# Close the device
+dev.off()
+
+knitr::include_graphics(plot_path1)
+```
+
+```{r}
+# Get the summary of mutations per sample
+sample_summary <- getSampleSummary(mm909)
+
+# View the sample summary to understand the data structure
+print(sample_summary)
+```
+
+```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=8}
+# Fig6
+
+# Oncoplot for top fifty mutated genes.
+
+# Define output path
+plot_path2 <- file.path(figures_fip_path, "maf_lof_top50.png")
+
+# Open a PNG device
+png(filename = plot_path2, width = 3500, height = 4000, res = 300)
+
+#Color coding for response
+resp_colors = c("#009E73", "#D55E00")
+names(resp_colors) = c("Responders", "Non-responders")
+response_colors = list(Patient_Response = resp_colors)
+
+#Color coding for sample id
+sample_colors <- c(
+  "#56B4E9", "#999999", "#8A2BE2", "#E69F00", "#D55E00", "#CC79A7", 
+  "#009E73", "#F0E442", "#0072B2", "#FF69B4", "#FFD700", "#000000", 
+  "#00CED1", "#4B0082", "#1E90FF", "#FF6347", "#32CD32", "#8B4513", 
+  "#FF4500", "#B22222", "#FFDAB9", "#20B2AA"
+)
+names(sample_colors) = unique(maf_df_annotated$Sample_ID)
+sample_id_colors = list(Sample_ID = sample_colors)
+
+print(response_colors)
+
+# Generate plot
+oncoplot(maf = mm909, top = 50, drawColBar = FALSE, clinicalFeatures = 'Patient_Response', sortByAnnotation = TRUE, annotationColor = response_colors, anno_height = 0.25, legend_height = 1, showTitle = FALSE, drawBox = TRUE, legendFontSize = 1.7, annotationFontSize = 1.7)
+
+# Close the device
+dev.off()
+
+knitr::include_graphics(plot_path2)
+```
+
+```{r, message=FALSE, warning=FALSE}
+mm909.titv = titv(maf = mm909, plot = FALSE, useSyn = TRUE)
+# Plot titv summary
+plotTiTv(res = mm909.titv)
+```
+
+```{r, message=FALSE, warning=FALSE}
+mm909.mutload = tcgaCompare(maf = mm909, cohortName = 'Example-mm909', logscale = TRUE, capture_size = 50)
+```
+
+# Explore shared LoF mutated genes
 
 ```{r, warning=FALSE, message=FALSE}
-library(VennDiagram)
+# Fig4
 
 resp_df <- clinical_resp_df %>% 
-  dplyr::select(Sample_ID, Patient_Response)
+  dplyr::select(Sample_ID, Patient_Response) %>% 
+  dplyr::rename(sample_id = Sample_ID,
+                patient_response = Patient_Response)
 
-maf_df_resp <- maf_df_annotated %>% 
-  dplyr::left_join(resp_df, by="Sample_ID")
+maf_df_resp <- lof_maf_df %>% 
+  dplyr::left_join(resp_df, by="sample_id")
 
 # Get genes for each response group
 responder_genes <- maf_df_resp %>%
-  dplyr::filter(Patient_Response == "Responders") %>%
+  dplyr::filter(patient_response == "Responders") %>%
   pull(hugo_symbol) %>%
   unique()
 
 non_responder_genes <- maf_df_resp %>%
-  dplyr::filter(Patient_Response == "Non-responders") %>%
+  dplyr::filter(patient_response == "Non-responders") %>%
   pull(hugo_symbol) %>%
   unique()
 

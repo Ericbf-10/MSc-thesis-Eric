@@ -21,26 +21,10 @@ output:
 This document is to analyse the cellular location of the ubiquitin-related genes that have any LoF mutation among all samples and see if there is a pattern that distinguishes responders from non-responders.
 
 ```{r, message=FALSE}
-### Load required libraries
-library(readxl)
-library(tidyverse)
-library(purrr)
-library(dplyr)
-library(knitr)
-library(DT)
-library(httr)
-library(jsonlite)
-library(stringr)
-library(biomaRt)
-library(GSEABase)
-library(HGNChelper)
-library(mygene)
-library(GO.db)
-library(ComplexHeatmap)
-library(circlize)
-
-### Load functions
+### Load packages, functions and paths
+source(file = "../01_install.R")
 source(file = "../02_functions.R")
+source(file = "../03_paths.R")
 
 ### Define paths
 current_dir <- getwd()
@@ -50,7 +34,7 @@ results_pc_path <- file.path(current_dir,
                               "../../results/patient_characteristics/output")
 results_fip_path <- file.path(current_dir,
                               "../../results/somatic_mutation_analysis/functional_impact_prediction/output")
-results_ubgenesets_path <- file.path(current_dir, 
+results_ubi_db_path <- file.path(current_dir, 
                                  "../../results/somatic_mutation_analysis/ubiquitin_custom_GS/output")
 results_ubfora_path <- file.path(current_dir, 
                                  "../../results/somatic_mutation_analysis/ubiquitin_fora/output")
@@ -116,95 +100,75 @@ patient_cell_loc_df <- patients_ub_lof_mut_cell_loc_df %>%
 # Left join patient response
 patient_cell_loc_resp_df <- patient_cell_loc_df %>% 
   dplyr::left_join(response_df, by="sample_id")
-```
-
-# Clustering based on cellular location: Heat map
-
-## R and NR Heat map
-
-```{r, message=FALSE, warning=FALSE}
-plot_path <- file.path(figures_cellular_loc_path, "cell_loc_heat_map_RvsNR.png")
-complex_heatmap_cell_loc(response_df, patient_cell_loc_resp_df, plot_path, "Heat Map of cellular location stratified by patient", 1000, 500)
-```
-
-![Heat Map of cellular location stratified by patient](/Users/ericbf10/Desktop/MSc-thesis-project-Eric/results/somatic_mutation_analysis/cellular_loc/figures/cell_loc_heat_map_RvsNR.png){width=100%, height=100%}
-
-## R Heat map
-
-```{r, message=FALSE, warning=FALSE}
-patient_cell_loc_R_df <- patient_cell_loc_resp_df %>% 
-  dplyr::filter(patient_response == "R")
-plot_path <- file.path(figures_cellular_loc_path, "cell_loc_heat_map_R.png")
-complex_heatmap_cell_loc(response_df, patient_cell_loc_R_df, plot_path, "Heat Map of cellular location of Responders", 1000, 500)
-```
-
-![Heat Map of cellular location of Responders](/Users/ericbf10/Desktop/MSc-thesis-project-Eric/results/somatic_mutation_analysis/cellular_loc/figures/cell_loc_heat_map_R.png){width=100%, height=100%}
-
-## NR Heat map
-
-```{r, message=FALSE, warning=FALSE}
-patient_cell_loc_NR_df <- patient_cell_loc_resp_df %>% 
-  dplyr::filter(patient_response == "NR")
-plot_path <- file.path(figures_cellular_loc_path, "cell_loc_heat_map_NR.png")
-complex_heatmap_cell_loc(response_df, patient_cell_loc_NR_df, plot_path, "Heat Map of cellular location of Non-responders", 1000, 500)
-```
-
-![Heat Map of cellular location of Non-responders](/Users/ericbf10/Desktop/MSc-thesis-project-Eric/results/somatic_mutation_analysis/cellular_loc/figures/cell_loc_heat_map_NR.png){width=100%, height=100%}
-
-What I see is that both groups have some genes in the nucleous and cytoplasm primarily, with some exceptions. I can't see a clear patter that distinguishes both groups regarding cellular compartment localization of the mutated genes. Also, I think it would be probably a good idea to normalize the "counts" by the number of mutations in each group, so that I have a "relative abundance" that is more comparable.
-
-# Further exploration: genes in each cell compartment
-
-```{r, message=FALSE, warning=FALSE, fig.height=6, fig.width=8}
-unique_shared_genes_path <- file.path(results_ubfora_path, 
-                      "unique_and_shared_genes_RvsNR.csv")
-unique_shared_genes_df <- read.csv(unique_shared_genes_path, header = TRUE)[ , -1]
-
-# Make sure rows are unique
-unique_cell_loc_df <- patients_ub_lof_mut_cell_loc_df %>% 
-  dplyr::select(-sample_id, -p_ensembl_id, -Location, -Allele, -Signals) %>% 
-  dplyr::distinct()
 
 # Split the cell_loc by '|', and unnest to long format
-unnest_cell_loc_df <- unique_cell_loc_df %>%
+final_cell_loc_df <- patient_cell_loc_resp_df %>%
   dplyr::mutate(cell_loc = strsplit(cell_loc, "\\|")) %>%
   tidyr::unnest(cell_loc)
 
-unique_hugo_df <- unique_shared_genes_df %>% 
-  dplyr::select(-go_parent_term) %>% 
-  dplyr::distinct()
-
-# Merge info
-combined_df <- unnest_cell_loc_df %>% 
-  dplyr::left_join(unique_hugo_df, by="ensembl_id") %>% 
-  dplyr::distinct()
-
 # Save to file
-cell_loc_path <- file.path(results_cellular_loc_path, 
-                      "cell_loc.rds")
-saveRDS(combined_df, file = cell_loc_path)
+cell_loc_path <- file.path(results_cellular_loc_path, "cell_loc.rds")
+saveRDS(final_cell_loc_df, file = cell_loc_path)
+```
 
-# Calculate the counts
-grouped_counts <- combined_df %>%
-  dplyr::select(ensembl_id, cell_loc, source) %>% 
-  group_by(cell_loc, source) %>%
-  summarise(count = n(), .groups = 'drop') %>% 
-  complete(cell_loc, source, fill = list(count = 0)) %>%
-  arrange(cell_loc, source) %>% 
-  dplyr::distinct()
+# Barplot: number of proteins ubi-related with LoF in each subcellular location stratified by response
+
+```{r, fig.height=6, fig.width=8}
+# Fig11
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggpubr)
+
+# Sample data frame (replace with your actual data)
+# final_cell_loc_df <- your_data_frame_here
+
+# Count occurrences of each cell_loc per sample_id
+counts_df <- final_cell_loc_df %>%
+  group_by(sample_id, cell_loc) %>%
+  summarise(count = n(), .groups = 'drop')
+
+# Summarize by patient_response
+summary_df <- counts_df %>%
+  left_join(final_cell_loc_df %>% dplyr::select(sample_id, patient_response) %>% distinct(), by = "sample_id") %>%
+  group_by(patient_response, cell_loc) %>%
+  summarise(
+    total_count = sum(count),
+    std_dev = sd(count),
+    .groups = 'drop'
+  )
+
+# Calculate p-values using Wilcoxon test
+wilcox_results <- counts_df %>%
+  left_join(final_cell_loc_df %>% dplyr::select(sample_id, patient_response) %>% distinct(), by = "sample_id") %>%
+  group_by(cell_loc) %>%
+  summarise(
+    p_value = if (n_distinct(patient_response) == 2) 
+                wilcox.test(count ~ patient_response)$p.value 
+              else NA,
+    .groups = 'drop'
+  )
+
+# Combine summary statistics and p-values
+final_stats <- summary_df %>%
+  left_join(wilcox_results, by = "cell_loc") %>% 
+  dplyr::mutate(p_value_label = paste0("p = ", format(p_value, digits = 1)))
 
 # Calculate the maximum count to set the y-axis limit dynamically
-max_count <- max(grouped_counts$count, na.rm = TRUE)
+max_count <- max(final_stats$total_count, na.rm = TRUE)
 buffer <- max_count * 0.1 # Add 10% buffer to the maximum count for the labels
 
-# Create the bar plot
-plot <- ggplot(grouped_counts, aes(x = cell_loc, y = count, fill = source)) +
-  geom_bar(stat = "identity", position = position_dodge(), width = 0.8) +  # dodge position to place bars side by side
-  geom_text(aes(label = ifelse(count == 0, "", count)), vjust = -0.5, position = position_dodge(0.9)) +  # Exclude "0" labels
-  scale_fill_manual(values = c("R" = "darkgreen", "NR" = "darkred", "Shared" = "purple")) +
-  labs(title = "Count of cellular compartment by Patient Response",
-       x = "Cellular compartment",
-       y = "Gene count",
+# Plotting
+plot <- ggplot(final_stats, aes(x = cell_loc, y = total_count, fill = patient_response)) +
+  geom_bar(stat = "identity", position = position_dodge(), width = 0.8) +
+  geom_errorbar(aes(ymin = total_count - std_dev, ymax = total_count + std_dev), 
+                position = position_dodge(0.8), width = 0.25) +
+  scale_fill_manual(values = c("R" = "#009E73", "NR" = "#D55E00"),
+                    labels = c("R" = "Responders", "NR" = "Non-responders")) +
+  labs(title = NULL,
+       x = "Subcellular location",
+       y = "Protein counts",
        fill = "Patient Response") +
   ylim(0, max_count + buffer) + # Adjust the y-axis to include the buffer
   theme_minimal() +
@@ -214,18 +178,129 @@ plot <- ggplot(grouped_counts, aes(x = cell_loc, y = count, fill = source)) +
       panel.background = element_rect(fill = "white", colour = "black"),
       plot.background = element_rect(fill = "white", colour = NA),
       axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +  # Rotate X-axis labels for better readability
-  scale_y_continuous(breaks = seq(0, max_count, by = 5),  # Ticks every 5 units
-                     minor_breaks = seq(0, max_count, by = 1))  # Minor ticks every 1 unit
+  scale_y_continuous(breaks = seq(0, max_count + 25, by = 10),  # Ticks every 5 units
+                     minor_breaks = seq(0, max_count + 25, by = 1))  # Minor ticks every 1 unit
 
-plot_path <- file.path(figures_cellular_loc_path,
-                              "barplot_R_NR_shared_cell_loc.png")
-ggsave(plot_path, plot, width = 12, height = 8, dpi = 300)
+# Add the p-value text labels
+plot <- plot + geom_text(data = final_stats, aes(x = cell_loc, y = max_count + buffer / 2, label = p_value_label), 
+                         vjust = -1, hjust = 0.5, size = 4, color = "black")
 
-# Print the plot
+plot_path <- file.path(figures_cellular_loc_path, "cell_loc_barplot.png")
+ggsave(plot_path, plot, width = 8, height = 6, dpi = 300)
 print(plot)
 ```
 
-The plot represents ubiquitin genes in R, NR and shared classified by their cellular localization. Some of the genes got different predicted cellular compartments, that's why we see more than 106 genes in total (reference to Venn Diagram). I can't see any clear pattern that distinguishes R and NR based on CC.
+<!-- # Clustering based on cellular location: Heat map -->
+
+<!-- ## R and NR Heat map -->
+
+<!-- ```{r, message=FALSE, warning=FALSE} -->
+<!-- plot_path <- file.path(figures_cellular_loc_path, "cell_loc_heat_map_RvsNR.png") -->
+<!-- complex_heatmap_cell_loc(response_df, patient_cell_loc_resp_df, plot_path, "Heat Map of cellular location stratified by patient", 1000, 500) -->
+<!-- ``` -->
+
+<!-- ![Heat Map of cellular location stratified by patient](/Users/ericbf10/Desktop/MSc-thesis-project-Eric/results/somatic_mutation_analysis/cellular_loc/figures/cell_loc_heat_map_RvsNR.png){width=100%, height=100%} -->
+
+<!-- ## R Heat map -->
+
+<!-- ```{r, message=FALSE, warning=FALSE} -->
+<!-- patient_cell_loc_R_df <- patient_cell_loc_resp_df %>%  -->
+<!--   dplyr::filter(patient_response == "R") -->
+<!-- plot_path <- file.path(figures_cellular_loc_path, "cell_loc_heat_map_R.png") -->
+<!-- complex_heatmap_cell_loc(response_df, patient_cell_loc_R_df, plot_path, "Heat Map of cellular location of Responders", 1000, 500) -->
+<!-- ``` -->
+
+<!-- ![Heat Map of cellular location of Responders](/Users/ericbf10/Desktop/MSc-thesis-project-Eric/results/somatic_mutation_analysis/cellular_loc/figures/cell_loc_heat_map_R.png){width=100%, height=100%} -->
+
+<!-- ## NR Heat map -->
+
+<!-- ```{r, message=FALSE, warning=FALSE} -->
+<!-- patient_cell_loc_NR_df <- patient_cell_loc_resp_df %>%  -->
+<!--   dplyr::filter(patient_response == "NR") -->
+<!-- plot_path <- file.path(figures_cellular_loc_path, "cell_loc_heat_map_NR.png") -->
+<!-- complex_heatmap_cell_loc(response_df, patient_cell_loc_NR_df, plot_path, "Heat Map of cellular location of Non-responders", 1000, 500) -->
+<!-- ``` -->
+
+<!-- ![Heat Map of cellular location of Non-responders](/Users/ericbf10/Desktop/MSc-thesis-project-Eric/results/somatic_mutation_analysis/cellular_loc/figures/cell_loc_heat_map_NR.png){width=100%, height=100%} -->
+
+<!-- What I see is that both groups have some genes in the nucleous and cytoplasm primarily, with some exceptions. I can't see a clear patter that distinguishes both groups regarding cellular compartment localization of the mutated genes. Also, I think it would be probably a good idea to normalize the "counts" by the number of mutations in each group, so that I have a "relative abundance" that is more comparable. -->
+
+<!-- # Further exploration: genes in each cell compartment -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.height=6, fig.width=8} -->
+<!-- # Fig11 -->
+
+<!-- unique_shared_genes_path <- file.path(results_ubfora_path,  -->
+<!--                       "unique_and_shared_genes_RvsNR.csv") -->
+<!-- unique_shared_genes_df <- read.csv(unique_shared_genes_path, header = TRUE)[ , -1] -->
+
+<!-- # Make sure rows are unique -->
+<!-- unique_cell_loc_df <- patients_ub_lof_mut_cell_loc_df %>%  -->
+<!--   dplyr::select(-sample_id, -p_ensembl_id, -Location, -Allele, -Signals) %>%  -->
+<!--   dplyr::distinct() -->
+
+<!-- # Split the cell_loc by '|', and unnest to long format -->
+<!-- unnest_cell_loc_df <- unique_cell_loc_df %>% -->
+<!--   dplyr::mutate(cell_loc = strsplit(cell_loc, "\\|")) %>% -->
+<!--   tidyr::unnest(cell_loc) -->
+
+<!-- unique_hugo_df <- unique_shared_genes_df %>%  -->
+<!--   dplyr::select(-go_parent_term) %>%  -->
+<!--   dplyr::distinct() -->
+
+<!-- # Merge info -->
+<!-- combined_df <- unnest_cell_loc_df %>%  -->
+<!--   dplyr::left_join(unique_hugo_df, by="ensembl_id") %>%  -->
+<!--   dplyr::distinct() -->
+
+<!-- # Save to file -->
+<!-- cell_loc_path <- file.path(results_cellular_loc_path, "cell_loc.rds") -->
+<!-- saveRDS(combined_df, file = cell_loc_path) -->
+
+<!-- # Calculate the counts -->
+<!-- grouped_counts <- combined_df %>% -->
+<!--   dplyr::select(ensembl_id, cell_loc, source) %>%  -->
+<!--   group_by(cell_loc, source) %>% -->
+<!--   summarise(count = n(), .groups = 'drop') %>%  -->
+<!--   tidyr::complete(cell_loc, source, fill = list(count = 0)) %>% -->
+<!--   arrange(cell_loc, source) %>%  -->
+<!--   dplyr::distinct() -->
+
+<!-- # Calculate the maximum count to set the y-axis limit dynamically -->
+<!-- max_count <- max(grouped_counts$count, na.rm = TRUE) -->
+<!-- buffer <- max_count * 0.1 # Add 10% buffer to the maximum count for the labels -->
+
+<!-- # Create the bar plot with error bars and p-values -->
+<!-- plot <- ggplot(grouped_counts, aes(x = cell_loc, y = count, fill = source)) + -->
+<!--   geom_bar(stat = "identity", position = position_dodge(), width = 0.8) +  # dodge position to place bars side by side -->
+<!--   geom_text(aes(label = count), vjust = -0.5, position = position_dodge(0.9)) +  # Exclude "0" labels -->
+<!--   scale_fill_manual(values = c("R" = "#009E73", "NR" = "#D55E00", "Shared" = "#CC79A7"), -->
+<!--                     labels = c("R" = "Responsers", "NR" = "Non-responders", "Shared" = "Shared")) + -->
+<!--   labs(title = NULL, -->
+<!--        x = "Subcellular compartment", -->
+<!--        y = "Gene counts", -->
+<!--        fill = "Response Group") + -->
+<!--   ylim(0, max_count + buffer) + # Adjust the y-axis to include the buffer -->
+<!--   theme_minimal() + -->
+<!--   theme( -->
+<!--       panel.grid.major = element_line(color = "lightgrey", linewidth = 0.5), -->
+<!--       panel.grid.minor = element_blank(), -->
+<!--       panel.background = element_rect(fill = "white", colour = "black"), -->
+<!--       plot.background = element_rect(fill = "white", colour = NA), -->
+<!--       axis.text.x = element_text(angle = 0, hjust = 1, vjust = 1)) +  # Rotate X-axis labels for better readability -->
+<!--   scale_y_continuous(breaks = seq(0, max_count, by = 5),  # Ticks every 5 units -->
+<!--                      minor_breaks = seq(0, max_count, by = 1))  # Minor ticks every 1 unit -->
+
+<!-- plot <- plot + stat_compare_means(aes(group = source), method = "wilcox.test", label = "p.format", vjust = -2) -->
+
+<!-- plot_path <- file.path(figures_cellular_loc_path, "barplot_R_NR_shared_cell_loc.png") -->
+<!-- ggsave(plot_path, plot, width = 12, height = 10, dpi = 300) -->
+
+<!-- # Print the plot -->
+<!-- print(plot) -->
+<!-- ``` -->
+
+<!-- The plot represents ubiquitin genes in R, NR and shared classified by their cellular localization. Some of the genes got different predicted cellular compartments, that's why we see more than 106 genes in total (reference to Venn Diagram). I can't see any clear pattern that distinguishes R and NR based on CC. -->
 
 # Session Info
 

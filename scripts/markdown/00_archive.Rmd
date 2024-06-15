@@ -968,6 +968,148 @@ make_combined_biomarker_plots <- function(df, biomarkers, ecotype_plot, tme_plot
 }
 ```
 
+# Tile plot of biomarkers
+
+## Using median
+
+```{r}
+# Pre-process biomarkers data.frame
+biomarkers <- c("TMB", "Release_of_cancer_cell_antigens_S1_TIP", "Cancer_antigen_presentation_S2_TIP", "APM_Senb", "IP_Kalaora", "MIAS", "Priming_and_activation_S3_TIP", "Trafficking_of_immune_cells_into_tumors_overall_S4_TIP", "Infiltration_of_immune_cells_into_tumors_S5_TIP", "Cytotoxic_cells_cTME", "Dendritic_cells_cTME", "B_cells_cTME", "T_cells_CD8_cTME", "T_cells_CD4_cTME", "T_regulatory_cells_cTME", "Dysfunction", "Exclusion", "Recognition_of_cancer_cells_by_T_cells_S6_TIP", "IMRES", "Killing_of_cancer_cells_S7_TIP", "ImmuneCyt_Davoli", "Tinflam_Ayers") # Removed "dup": APMS_Thomson, IP_score
+
+result <- biomarkers_clustering_order(biomarkers_clinical_ubi, biomarkers, "median")
+
+# Update the SampleID factor levels based on clustering order
+biomarkers_df <- result$df_biomarkers_category %>%
+  dplyr::rename(patient_response = Response,
+                sample_id = SampleID) %>% 
+  dplyr::mutate(sample_id = factor(sample_id, levels = result$sample_order))
+
+# Dendrogram
+dend <- as.dendrogram(result$clustering)
+
+# Convert the dendrogram to a data frame for ggplot
+dend_data <- ggdendro::dendro_data(dend)
+```
+
+```{r}
+# Responders
+responders_df <- biomarkers_clinical_ubi %>%
+  dplyr::filter(Response == "R") %>% 
+  droplevels()
+
+result <- biomarkers_clustering_order(responders_df, biomarkers, "median")
+
+# Update the SampleID factor levels based on clustering order
+biomarkers_df <- result$df_biomarkers_category %>%
+  dplyr::rename(patient_response = Response,
+                sample_id = SampleID) %>%
+  dplyr::mutate(sample_id = factor(sample_id, levels = result$sample_order))
+
+# Dendrogram
+dend <- as.dendrogram(result$clustering)
+
+# Convert the dendrogram to a data frame for ggplot
+dend_data <- ggdendro::dendro_data(dend)
+```
+
+```{r}
+# Non-Responders
+responders_df <- biomarkers_clinical_ubi %>%
+  dplyr::filter(Response == "NR") %>%
+  droplevels()
+
+result <- biomarkers_clustering_order(responders_df, biomarkers, "median")
+
+# Update the SampleID factor levels based on clustering order
+biomarkers_df <- result$df_biomarkers_category %>%
+  dplyr::rename(patient_response = Response,
+                sample_id = SampleID) %>%
+  dplyr::mutate(sample_id = factor(sample_id, levels = result$sample_order))
+
+# Dendrogram
+dend <- as.dendrogram(result$clustering)
+
+# Convert the dendrogram to a data frame for ggplot
+dend_data <- ggdendro::dendro_data(dend)
+```
+
+```{r, fig.height=10, fig.width=10}
+# Make median tile plot
+
+# Ecotyper and TME plots
+ecotype_plot <- make_ecotyper_tme_annotation_plot(biomarkers_df, "Ecotype", "Ecotype category", 1, c("CE1" = "CE1", "CE2" = "CE2", "CE3" = "CE3", "CE4" = "CE4", "CE5" = "CE5", "CE6" = "CE6", "CE7" = "CE7", "CE8" = "CE8", "CE9" = "CE9", "CE10" = "CE10", "NA" = "NA"))
+tme_plot <- make_ecotyper_tme_annotation_plot(biomarkers_df, "TME", "TME category", 11, c("D" = "Desert", "F" = "Fibrotic", "IE" = "Immune-Enriched Non-Fibrotic", "IE/F" = "Immune-Enriched Fibrotic"))
+
+# Ubi and deubi plots
+ubi_plot <- make_ubi_annotation_plot(biomarkers_clinical_ubi, "ubi_lof", "LoF mutation in Ubiquitination enzyme  ", c("Absent", "Present"))
+deubi_plot <- make_ubi_annotation_plot(biomarkers_clinical_ubi, "deubi_lof", "LoF mutation in Deubiquitination enzyme", c("Absent", "Present"))
+
+# Create the final plot
+final_plot <- make_combined_biomarker_plots(biomarkers_df, biomarkers, ecotype_plot, tme_plot, ubi_plot, deubi_plot, dend_data)
+
+# Save and print the plot
+plot_path <- file.path(figures_expression_path,
+                      "cancer_immunity_cycle_biomarkers_median.png")
+ggsave(plot_path, final_plot, width = 10, height = 10, dpi = 300)
+print(final_plot)
+```
+
+## Using mean
+
+```{r}
+# Pre-process biomarkers data.frame
+biomarkers <- c("TMB", "Release_of_cancer_cell_antigens_S1_TIP", "Cancer_antigen_presentation_S2_TIP", "APM_Senb", "IP_Kalaora", "MIAS", "Priming_and_activation_S3_TIP", "Trafficking_of_immune_cells_into_tumors_overall_S4_TIP", "Infiltration_of_immune_cells_into_tumors_S5_TIP", "Cytotoxic_cells_cTME", "Dendritic_cells_cTME", "B_cells_cTME", "T_cells_CD8_cTME", "T_cells_CD4_cTME", "T_regulatory_cells_cTME", "Dysfunction", "Exclusion", "Recognition_of_cancer_cells_by_T_cells_S6_TIP", "IMRES", "Killing_of_cancer_cells_S7_TIP", "ImmuneCyt_Davoli", "Tinflam_Ayers", "TumorPurity")
+
+result <- biomarkers_clustering_order(biomarkers_clinical_ubi, biomarkers, "mean")
+
+# Dendrogram
+dend <- as.dendrogram(result$clustering)
+
+# Convert the dendrogram to a data frame for ggplot
+dend_data <- ggdendro::dendro_data(dend)
+
+# Update the SampleID factor levels based on clustering order
+biomarkers_df <- result$df_biomarkers_category %>%
+  dplyr::rename(patient_response = Response,
+                sample_id = SampleID) %>%
+  dplyr::mutate(sample_id = factor(sample_id, levels = result$sample_order))
+
+# Re-order final_category_ub_df
+
+# Filter out rows with sample_id not in sample_order
+final_category_ub_df <- category_ub_df %>%
+  dplyr::filter(sample_id %in% result$sample_order)
+
+# Replace NA values with "0"
+final_category_ub_df$Ubi_Category[is.na(final_category_ub_df$Ubi_Category)] <- "0"
+final_category_ub_df$Deubi_Category[is.na(final_category_ub_df$Deubi_Category)] <- "0"
+
+# Convert sample_id to factor with the correct levels
+final_category_ub_df <- final_category_ub_df %>%
+  mutate(sample_id = factor(sample_id, levels = result$sample_order))
+```
+
+```{r, fig.height=10, fig.width=10}
+# Make mean tile plot
+
+# Ecotyper and TME plots
+ecotype_plot <- make_ecotyper_tme_annotation_plot(biomarkers_df, "Ecotype", "Ecotype category", 1, c("CE1" = "CE1", "CE2" = "CE2", "CE3" = "CE3", "CE4" = "CE4", "CE5" = "CE5", "CE6" = "CE6", "CE7" = "CE7", "CE8" = "CE8", "CE9" = "CE9", "CE10" = "CE10", "NA" = "NA"))
+tme_plot <- make_ecotyper_tme_annotation_plot(biomarkers_df, "TME", "TME category", 11, c("D" = "Desert", "F" = "Fibrotic", "IE" = "Immune-Enriched Non-Fibrotic", "IE/F" = "Immune-Enriched Fibrotic"))
+
+# Ubi and deubi plots
+ubi_plot <- make_ubi_annotation_plot(final_category_ub_df, "Ubi_Category", "Mutation in Ubiquitination enzyme  ", c("1" = "Present", "0" = "Absent"))
+deubi_plot <- make_ubi_annotation_plot(final_category_ub_df, "Deubi_Category", "Mutation in Deubiquitination enzyme", c("1" = "Present", "0" = "Absent"))
+
+# Create the final plot
+final_plot <- make_combined_biomarker_plots(biomarkers_df, biomarkers, ecotype_plot, tme_plot, ubi_plot, deubi_plot, dend_data)
+
+# Save and print the plot
+plot_path <- file.path(figures_expression_path,
+                      "cancer_immunity_cycle_biomarkers_mean.png")
+ggsave(plot_path, final_plot, width = 10, height = 10, dpi = 300)
+print(final_plot)
+```
+
 ## Session Info
 
 ```{r}

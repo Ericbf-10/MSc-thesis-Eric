@@ -1,0 +1,1791 @@
+---
+title: "Impact of dysfunctional ubiquitination in response to cancer immunotherapy"
+subtitle: <center> Somatic mutations analysis - Ubiquitin custom Gene Sets </center>
+author: "Eric Bautista Farrerons (s212514)"
+date: '`r paste("First created on March 2024. Updated on ", format(Sys.Date(), "%d %B %Y"))`'
+output:
+  html_document:
+    css: style.css
+    code_folding: hide
+    fig_caption: yes
+    toc: yes
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    toc_depth: 4
+    number_sections: true
+---
+
+# Load data
+
+```{r, message=FALSE}
+### Load packages, functions and paths
+source(file = "../01_install.R")
+source(file = "../02_functions.R")
+source(file = "../03_paths.R")
+
+### Define paths
+current_dir <- getwd()
+data_path <- file.path(current_dir,
+                       "../../data/_raw")
+results_pc_path <- file.path(current_dir,
+                              "../../results/patient_characteristics/output")
+results_fip_path <- file.path(current_dir,
+                              "../../results/somatic_mutation_analysis/functional_impact_prediction/output")
+results_ubi_db_path <- file.path(current_dir, 
+                                 "../../results/somatic_mutation_analysis/ubi_db_creation/output")
+
+# Create the folder if it does not exist
+if(!file.exists(results_ubi_db_path)) {
+  dir.create(results_ubi_db_path, recursive = TRUE)
+}
+
+figures_ubi_db_path <- file.path(current_dir, 
+                                 "../../results/somatic_mutation_analysis/ubi_db_creation/figures")
+
+# Create the folder if it does not exist
+if(!file.exists(figures_ubi_db_path)) {
+  dir.create(figures_ubi_db_path, recursive = TRUE)
+}
+
+maf_df_path <- file.path(results_fip_path, "all_mutations.csv") # All mutations df
+nonsyn_df_path <- file.path(results_fip_path, "nonsyn_mutations.csv") # Nonsyn mutations df
+lof_df_path <- file.path(results_fip_path, "lof_mutations_reduced.csv") # LoF mutations df
+
+# Sup1 data
+sup1_response_path <- file.path(results_pc_path, 
+                           "sup1_response.csv")
+### Read data & wrangle
+
+# Read 3 lists of mutations
+
+# All
+maf_df_annotated <- read.csv(maf_df_path, header = TRUE)[ , -1]
+list_of_all_mutations <- split(maf_df_annotated, maf_df_annotated$sample_id
+                               )
+# Nonsyn
+nonsyn_df_annotated <- read.csv(nonsyn_df_path, header = TRUE)[ , -1]
+list_of_nonsyn_mutations <- split(nonsyn_df_annotated, nonsyn_df_annotated$sample_id)
+
+# LoF
+lof_df_annotated <- read.csv(lof_df_path, header = TRUE)[ , -1]
+list_of_lof_mutations <- split(lof_df_annotated, lof_df_annotated$sample_id)
+
+# Get the list of patient IDs
+sample_id_list <- unique(maf_df_annotated$sample_id)
+
+## Read sup1_response.csv
+sup1_response_df <- read.csv(sup1_response_path)[ , -1] # Drop first column
+
+# df to merge response info later
+response_df <- sup1_response_df %>% 
+  dplyr::rename(sample_id = Sample.ID,
+                patient_response = Patient.Response) %>% 
+  dplyr::select(sample_id, patient_response)
+
+# Create a list of Responders and Non-responders
+sample_id_lists <- split(sup1_response_df$Sample.ID, 
+                         sup1_response_df$Patient.Response) # Split the "Sample.ID" values into lists based on "Patient.Response"
+
+r_sample_ids <- sample_id_lists$R
+nr_sample_ids <- sample_id_lists$NR
+```
+
+# Correcting Hugo Symbols in input data
+
+```{r, message=FALSE, warning=FALSE}
+# Load the GMT file
+gene_sets_collection <- getGmt(file.path(data_path, "ubgenes.gmt"))
+
+# Initialize an empty data frame for gene IDs
+corrected_hsymbols <- data.frame()
+
+# Extract gene sets and their descriptions
+for (gene_set_id in names(gene_sets_collection)) {
+  gene_set <- gene_sets_collection[[gene_set_id]]
+  gene_ids <- geneIds(gene_set)
+  
+  # Replace "/" with "-" in gene IDs
+  gene_ids <- gsub("/", "-", gene_ids)
+  
+  # Reverse date-like hugo symbols
+  gene_ids <- correct_date_like_symbols(gene_ids)
+  
+  # Create a temporary data frame for this gene set
+  temp_df <- checkGeneSymbols(gene_ids)
+  
+  # Combine with the main data frame
+  corrected_hsymbols <- rbind(corrected_hsymbols, temp_df)
+}
+
+# Split the gene_id where "///" is found and keep only the second part (if exists)
+corrected_hsymbols$Suggested.Symbol <- sapply(str_split(corrected_hsymbols$Suggested.Symbol, " /// "), function(x) {
+  if (length(x) > 1) {
+    # If there's more than one part, keep the second one
+    return(trimws(x[2]))
+  } else {
+    # If there's only one part, keep it as is
+    return(trimws(x[1]))
+  }
+})
+
+corrected_hsymbols <- corrected_hsymbols %>% 
+  dplyr::rename(c(hugo_symbol = x, 
+                  corrected_hugo_symbol = Suggested.Symbol)) %>% 
+  dplyr::select(hugo_symbol, corrected_hugo_symbol)
+```
+
+# Filtering lists to only include Ubiquitin-related genes
+
+```{r, message=FALSE, warning=FALSE}
+# Map HUGO symbols to Ensembl Gene IDs
+corrected_hsymbols$ensembl_id <- SYMBOLtoENSEMBL(corrected_hsymbols$corrected_hugo_symbol)
+
+# Check missing Ensembl IDs
+missing_ensembl <- corrected_hsymbols %>% 
+  dplyr::filter(!str_detect(ensembl_id, "^ENSG"))
+
+# Find them manually and update df (for now only Ensembl Gene IDs)
+missing_ensembl <- missing_ensembl %>%
+  dplyr::mutate(
+    # corrected_hugo_symbol = case_when(
+  #   hugo_symbol == "UBE2L5" ~ "UBE2L5P",
+  #   hugo_symbol == "BABAM2" ~ "BRE",
+  #   hugo_symbol == "COP1" ~ "RFWD2",
+  #   hugo_symbol == "DCAF1" ~ "VPRBP",
+  #   hugo_symbol == "DMAC2" ~ "ATP5SL",
+  #   hugo_symbol == "ELOB" ~ "TCEB2",
+  #   hugo_symbol == "FBH1" ~ "FBXO18",
+  #   hugo_symbol == "FBXL21P" ~ "FBXL21",
+  #   hugo_symbol == "MARCHF6" ~ "MARCH6",
+  #   hugo_symbol == "1-Mar" ~ "MARCH1",
+  #   hugo_symbol == "10-Mar" ~ "MARCH10",
+  #   hugo_symbol == "11-Mar" ~ "MARCH11",
+  #   hugo_symbol == "2-Mar" ~ "MARCH2",
+  #   hugo_symbol == "3-Mar" ~ "MARCH3",
+  #   hugo_symbol == "4-Mar" ~ "MARCH4",
+  #   hugo_symbol == "5-Mar" ~ "MARCH5",
+  #   hugo_symbol == "6-Mar" ~ "MARCH6",
+  #   hugo_symbol == "7-Mar" ~ "MARCH7",
+  #   hugo_symbol == "8-Mar" ~ "MARCH8",
+  #   hugo_symbol == "9-Mar" ~ "MARCH9",
+  #   hugo_symbol == "PARK2" ~ "PARK2",
+  #   hugo_symbol == "RFWD2" ~ "RFWD2",
+  #   hugo_symbol == "RNF212B" ~ "C14orf164",
+  #   hugo_symbol == "RNF219" ~ "RNF219",
+  #   hugo_symbol == "RNF225" ~ "RNF225",
+  #   hugo_symbol == "TRIM75P" ~ "TRIM75P",
+  #   hugo_symbol == "ZNF645" ~ "ZNF645",
+  #   hugo_symbol == "USP17L1" ~ "USP17L1P",
+  #   hugo_symbol == "OTULIN" ~ "FAM105B",
+  #   TRUE ~ corrected_hugo_symbol
+  # ),
+  ensembl_id = case_when(
+    hugo_symbol == "UBE2L5" ~ "ENSG00000236444",
+    hugo_symbol == "BABAM2" ~ "ENSG00000158019",
+    hugo_symbol == "COP1" ~ "ENSG00000143207",
+    hugo_symbol == "DCAF1" ~ "ENSG00000145041",
+    hugo_symbol == "DMAC2" ~ "ENSG00000105341",
+    hugo_symbol == "ELOB" ~ "ENSG00000103363",
+    hugo_symbol == "FBH1" ~ "ENSG00000134452",
+    hugo_symbol == "FBXL21P" ~ "ENSG00000164616",
+    hugo_symbol == "MARCHF6" ~ "ENSG00000145495",
+    hugo_symbol == "1-Mar" ~ "ENSG00000145416",
+    hugo_symbol == "10-Mar" ~ "ENSG00000173838",
+    hugo_symbol == "11-Mar" ~ "ENSG00000183654",
+    hugo_symbol == "2-Mar" ~ "ENSG00000099785",
+    hugo_symbol == "3-Mar" ~ "ENSG00000173926",
+    hugo_symbol == "4-Mar" ~ "ENSG00000144583",
+    hugo_symbol == "5-Mar" ~ "ENSG00000198060",
+    hugo_symbol == "6-Mar" ~ "ENSG00000145495",
+    hugo_symbol == "7-Mar" ~ "ENSG00000136536",
+    hugo_symbol == "8-Mar" ~ "ENSG00000165406",
+    hugo_symbol == "9-Mar" ~ "ENSG00000139266",
+    hugo_symbol == "PARK2" ~ "ENSG00000185345",
+    hugo_symbol == "RFWD2" ~ "ENSG00000143207",
+    hugo_symbol == "RNF212B" ~ "ENSG00000215277",
+    hugo_symbol == "RNF219" ~ "ENSG00000152193",
+    hugo_symbol == "RNF225" ~ "ENSG00000269855",
+    hugo_symbol == "TRIM75P" ~ "ENSG00000250374",
+    hugo_symbol == "ZNF645" ~ "ENSG00000175809",
+    hugo_symbol == "USP17L1" ~ "ENSG00000230549",
+    hugo_symbol == "OTULIN" ~ "ENSG00000154124",
+    TRUE ~ ensembl_id
+  ))
+
+# Merge the dataframes
+corrected_hsymbols_updated <- corrected_hsymbols %>%
+  left_join(dplyr::select(missing_ensembl, 
+                          hugo_symbol, 
+                          # new_corrected_hugo_symbol = corrected_hugo_symbol, 
+                          new_ensembl_id = ensembl_id),
+            by = "hugo_symbol")
+
+# Update the values based on the join
+corrected_hsymbols_updated <- corrected_hsymbols_updated %>%
+  dplyr::mutate(
+    # corrected_hugo_symbol = ifelse(!is.na(new_corrected_hugo_symbol), new_corrected_hugo_symbol, corrected_hugo_symbol),
+    ensembl_id = ifelse(!is.na(new_ensembl_id), new_ensembl_id, ensembl_id)
+    ) %>%
+  dplyr::select(
+    # -new_corrected_hugo_symbol, 
+    -new_ensembl_id)
+
+# Extract the ensembl_id column to do the filtering
+ubiquitin_df <- corrected_hsymbols_updated %>% 
+  dplyr::select(ensembl_id)
+
+# Get ubiquitin unique ensembl ids
+ub_ensembl_ids <- unique(corrected_hsymbols_updated$ensembl_id)
+
+# Filter for ubiquitin genes in all the mutation lists
+list_of_all_ub_mutations <- ubiquitin_filter(list_of_all_mutations, ubiquitin_df)
+list_of_nonsyn_ub_mutations <- ubiquitin_filter(list_of_nonsyn_mutations, ubiquitin_df)
+list_of_lof_ub_mutations <- ubiquitin_filter(list_of_lof_mutations, ubiquitin_df)
+
+# Bind rows to re-generate the dataframes
+all_df_ubiquitin <- bind_rows(list_of_all_ub_mutations)
+nonsyn_df_ubiquitin <- bind_rows(list_of_nonsyn_ub_mutations)
+lof_df_ubiquitin <- bind_rows(list_of_lof_ub_mutations)
+
+# Get all unique sample_id values
+unique_sample_ids <- unique(list_of_lof_ub_mutations$sample_id)
+```
+
+# Summary of mutations per patient
+
+```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=12}
+# Define output path
+mm909_sum_plot_path <- file.path(figures_ubi_db_path,
+                              "mm909_sum_plot.png")
+
+# Summary plot
+mm909_sum_plot <- sum_plot(response_df, all_df_ubiquitin, nonsyn_df_ubiquitin, lof_df_ubiquitin, mm909_sum_plot_path)
+
+# Display
+print(mm909_sum_plot)
+```
+
+Sample MM909_47 does not have any Ubiquitin-related gene, and MM909_14, MM909_36 don't have any LoF on ubiquitin genes.
+
+# Build a DB of GO terms for ubiquitin-related Bio Processes (based on gene list)
+
+#### Get all GO.db terms.
+#### Query GO database using mygene to find GO terms for Ub genes (gmt file).
+#### Use grch37 and PFAM to recover lost genes. The rest annotate manually: Ensembl & UniProt mainly.
+#### Define categories. Define which parent terms I want to use and get offspring.
+#### Build the DB with Category > Parent > Children.
+#### Iterate through the ubiquitin terms from GO.db and annotate the parent terms. Make a data.frame.
+#### Check the ones that have +1 GO parent term and reduce to 1.
+#### Get more parent terms for lost genes and repeat 2 previous steps.
+#### Get Ensembl IDs related to those GO terms.
+#### Perform FORA and make plots.
+
+```{r, message=FALSE, warning=FALSE}
+#1 Get all GO terms related to ubiquitin and filter for BP
+ubiquitin_terms <- searchGOTerms("ubiquitin")
+ub_godb_bp_df <- ubiquitin_terms %>%
+  # dplyr::filter(go_category == "BP") %>%
+  dplyr::select(go_id, go_term, go_category) %>%
+  dplyr::distinct()
+
+#1 Get all GO terms to merge later. Do not filter for BP
+all_go_terms <- as.list(GOTERM)
+
+#2 Query GO database using mygene to find GO terms of Ub genes
+
+# Query the database to find GO terms associated to each gene
+go_ubgenes_result <- queryMany(ub_ensembl_ids,
+                 scopes='ensembl.gene', 
+                 fields=c('ensembl.gene', 'name', 'summary', 'go', 'pfam'), 
+                 species='human', 
+                 return.as='DataFrame')
+
+# Filter result for BP
+go_ubgenes_bp_res <- go_ubgenes_result$go.BP # Filter for BP only
+names(go_ubgenes_bp_res) <- ub_ensembl_ids # Set names
+
+# Convert to data.frame each element of the list
+go_ubgenes_bp_list <- lapply(go_ubgenes_bp_res, 
+                             function(df) 
+                               if (is.null(df)) data.frame(id = character(),
+                                                           gocategory = character(), 
+                                                           term = character()) 
+                               else df %>% 
+                                as.data.frame())
+# Wrangle the data.frame
+go_ubgenes_bp_list <- lapply(go_ubgenes_bp_list,
+                             function(x) 
+                               x %>% 
+                                dplyr::rename(go_id = id,
+                                              go_term = term,
+                                              go_category = gocategory) %>% 
+                                dplyr::select(go_category,
+                                              go_id,
+                                              go_term))
+# Convert list of df to single data.frame
+raw_ub_glist_go_bp_df <- bind_rows(go_ubgenes_bp_list, .id = "ensembl_id") %>%
+  dplyr::distinct()
+
+# Here I lose 28 genes because GO annotation failed. Collect them for exploration.
+empty_dfs <- sapply(go_ubgenes_bp_list, function(x) dim(x)[1] == 0)
+lost_genes <- ub_ensembl_ids[empty_dfs]
+
+#3 Recover lost genes
+# Recover some using BiomaRt with grch37
+# Connect to the GO BioMart database
+ensembl = biomaRt::useMart(biomart="ENSEMBL_MART_ENSEMBL",
+                  host="https://grch37.ensembl.org",
+                  path="/biomart/martservice",
+                  dataset="hsapiens_gene_ensembl")
+
+# Retrieve GO & Ensembl gene ids
+ensembl2go_biomart_res <- biomaRt::getBM(attributes = c("namespace_1003",
+                                                        "name_1006",
+                                                        "go_id",
+                                                        "ensembl_gene_id"),
+                   filters = "ensembl_gene_id",
+                   values = lost_genes,
+                   mart = ensembl)
+
+# Filter for biological_process
+ensembl2go_bp_res <- ensembl2go_biomart_res %>%
+  dplyr::rename(go_category = namespace_1003,
+                go_term = name_1006,
+                ensembl_id = ensembl_gene_id) %>%
+  dplyr::filter(go_category == "biological_process") %>%
+  dplyr::mutate(go_category = ifelse(go_category == "biological_process", "BP", go_category)) %>% 
+  dplyr::distinct() %>% 
+  dplyr::select(ensembl_id, go_category, go_id, go_term) # Re-arrange
+
+# Append to raw_ub_glist_go_bp_df
+raw_ub_glist_go_bp_df <- bind_rows(raw_ub_glist_go_bp_df, ensembl2go_bp_res)
+
+# Here I lose 19 genes because GO annotation failed. Recovered 9 using grch37. Collect them for exploration.
+lost_genes2 <- setdiff(ub_ensembl_ids, raw_ub_glist_go_bp_df$ensembl_id)
+
+# Annotate using PFAM where possible
+# Get PFAM for lost_genes2
+# Filter result for pfam
+pfam_ubgenes <- go_ubgenes_result$pfam
+names(pfam_ubgenes) <- ub_ensembl_ids # Set names
+
+# Find pfam for lost_genes2
+pfam_lost_genes <- pfam_ubgenes[names(pfam_ubgenes) %in% lost_genes2]
+
+# Remove the ones that have NULL and collect for manual annotation.
+# Identify NULL elements
+null_elements <- sapply(pfam_lost_genes, is.null)
+
+# Remove NULL elements from pfam_lost_genes
+pfam_lost_genes <- pfam_lost_genes[!null_elements]
+
+# Convert to df
+pfam_ubgenes_df <- pfam_ubgenes %>% 
+  tibble::enframe(name = "ensembl_id", value = "pfam") %>% 
+  tidyr::unnest(pfam) %>% 
+  dplyr::distinct()
+
+pfam_lost_genes_df <- pfam_lost_genes %>% 
+  tibble::enframe(name = "ensembl_id", value = "pfam") %>% 
+  tidyr::unnest(pfam) %>% 
+  dplyr::distinct()
+
+# Check if another annotated gene has the same PFAM domain and annotate it
+# Perform an inner join on the pfam column
+shared_pfam_df <- pfam_lost_genes_df %>%
+  dplyr::inner_join(pfam_ubgenes_df, by = "pfam", suffix = c("_lost", "_ub")) %>%
+  # Filter out rows where ensembl_id matches between the two dataframes
+  dplyr::filter(ensembl_id_lost != ensembl_id_ub)
+
+# Query PFAM domains to get GO terms
+query_pfam <- unique(pfam_lost_genes_df$pfam)
+pfam_ubgenes_result <- queryMany(query_pfam,
+                 scopes='pfam', 
+                 fields=c('ensembl.gene', 'name', 'go', 'pfam'), 
+                 species='human', 
+                 return.as='DataFrame')
+
+# Filter result for BP
+pfam_ubgenes_bp_res <- pfam_ubgenes_result$go.BP # Filter for BP only
+query_names <- pfam_ubgenes_result$query
+query_ensembl <- pfam_ubgenes_result$ensembl
+
+# Set names
+names(pfam_ubgenes_bp_res) <- query_names
+names(query_ensembl) <- query_names
+
+# Convert to data.frame each element of the list
+pfam_ubgenes_bp_list <- lapply(pfam_ubgenes_bp_res, 
+                             function(df) 
+                               if (is.null(df)) data.frame(id = character(),
+                                                           gocategory = character(), 
+                                                           term = character()) 
+                               else df %>% 
+                                as.data.frame())
+# Wrangle the data.frame
+pfam_ubgenes_bp_list <- lapply(pfam_ubgenes_bp_list,
+                             function(x) 
+                               x %>% 
+                                dplyr::rename(go_id = id,
+                                              go_term = term,
+                                              go_category = gocategory) %>% 
+                                dplyr::select(go_category,
+                                              go_id,
+                                              go_term))
+
+pfam_ubgenes_bp_list_with_ensembl <- lapply(names(pfam_ubgenes_bp_list), function(name) {
+  # Extract the corresponding dataframe
+  df <- pfam_ubgenes_bp_list[[name]]
+  
+  # Extract the corresponding ensembl_id, ensure it's not a list but a single value or a vector of the same value
+  ensembl_id <- rep(query_ensembl[name], ifelse(is.null(df), 1, nrow(df)))
+  
+  # Handle the case where the dataframe is NULL or empty
+  if(is.null(df) || nrow(df) == 0) {
+    # Create a dataframe with a single row indicating NA entries except for the ensembl_id
+    df <- data.frame(go_id = NA, go_category = NA, go_term = NA, stringsAsFactors = FALSE)
+    n <- length(ensembl_id) # Ensure there's at least one row for the ensembl_id
+    df <- df[rep(1, n), ]
+  }
+  
+  # Assign the ensembl_id(s)
+  df$ensembl_id <- ensembl_id
+  
+  df
+})
+
+# Set names again
+names(pfam_ubgenes_bp_list_with_ensembl) <- query_names
+
+# Ensure every dataframe in the list has columns of the correct type, handling empty dataframes explicitly
+pfam_ubgenes_bp_list_standardized <- purrr::map(pfam_ubgenes_bp_list_with_ensembl, function(df) {
+  if(nrow(df) == 0) { # Check if the dataframe is empty
+    # Explicitly define the dataframe with the correct types for each column
+    df <- data.frame(go_id = character(), 
+                     go_category = character(), 
+                     go_term = character(), 
+                     ensembl_id = character(), 
+                     stringsAsFactors = FALSE)
+  } else {
+    # For non-empty dataframes, ensure all columns are of type character
+    df$go_id <- as.character(df$go_id)
+    df$go_category <- as.character(df$go_category)
+    df$go_term <- as.character(df$go_term)
+    df$ensembl_id <- as.character(unlist(df$ensembl_id))
+  }
+  df
+})
+
+# Now combine the standardized list of dataframes into a single dataframe
+pfam2go_res_df <- bind_rows(pfam_ubgenes_bp_list_standardized, .id = "pfam") %>%
+  dplyr::distinct() %>% 
+  dplyr::rename(ensembl_id_ub = ensembl_id)
+
+# Map pfam2go_res_df to shared_pfam_df by ensembl_id_ub
+found_pfam_df <- pfam2go_res_df %>%
+  dplyr::inner_join(shared_pfam_df, by = c("ensembl_id_ub", "pfam")) %>%
+  # Filter out rows where ensembl_id matches between the two dataframes
+  dplyr::filter(ensembl_id_lost != ensembl_id_ub)
+
+# Arrange df to merge with raw_ub_glist_go_bp_df
+merge_pfam2go <- found_pfam_df %>% 
+  dplyr::select(ensembl_id_lost, go_category, go_id, go_term) %>% 
+  dplyr::rename(ensembl_id = ensembl_id_lost)
+
+# Merge with previous df
+raw_ub_glist_go_bp_df <- bind_rows(raw_ub_glist_go_bp_df, merge_pfam2go) %>% 
+  dplyr::distinct()
+
+# Collect not annotated genes for manual annotation.
+lost_genes3 <- setdiff(ub_ensembl_ids, raw_ub_glist_go_bp_df$ensembl_id)
+
+# Here, I still have 14 genes for which I don't have GO term. Recovered 5 with PFAM.
+
+# Manually annotate the remaining 14 genes.
+manual_annot_df <- data.frame(
+  ensembl_id = lost_genes3,
+  go_category = rep("", length(lost_genes3)),
+  go_id = rep("", length(lost_genes3)),
+  go_term = rep("", length(lost_genes3)),
+  stringsAsFactors = FALSE
+)
+manual_annot_df <- manual_annot_df %>%
+  dplyr::mutate(
+    go_id = case_when(
+      ensembl_id == "ENSG00000131982" ~ "GO:0016567",
+      ensembl_id == "ENSG00000267741" ~ "GO:0000209",
+      ensembl_id == "ENSG00000198354" ~ "GO:0080008",
+      ensembl_id == "ENSG00000226372" ~ "GO:0080008",
+      ensembl_id == "ENSG00000189186" ~ "GO:0080008",
+      ensembl_id == "ENSG00000164616" ~ "GO:0016567",
+      ensembl_id == "ENSG00000187954" ~ "GO:0008270",
+      ensembl_id == "ENSG00000238222" ~ "GO:0016567",
+      ensembl_id == "ENSG00000010318" ~ "GO:0046872",
+      ensembl_id == "ENSG00000167257" ~ "GO:0004842",
+      ensembl_id == "ENSG00000189051" ~ "GO:0046872",
+      ensembl_id == "ENSG00000233198" ~ "GO:0046872",
+      ensembl_id == "ENSG00000034063" ~ "GO:0006511",
+      ensembl_id == "ENSG00000251694" ~ "GO:0004843",
+      TRUE ~ go_id  # Keeps existing value if no condition is matched
+    ),
+    go_term = case_when(
+      ensembl_id == "ENSG00000131982" ~ "protein ubiquitination",
+      ensembl_id == "ENSG00000267741" ~ "protein polyubiquitination",
+      ensembl_id == "ENSG00000198354" ~ "Cul4-RING E3 ubiquitin ligase complex",
+      ensembl_id == "ENSG00000226372" ~ "Cul4-RING E3 ubiquitin ligase complex",
+      ensembl_id == "ENSG00000189186" ~ "Cul4-RING E3 ubiquitin ligase complex",
+      ensembl_id == "ENSG00000164616" ~ "protein ubiquitination",
+      ensembl_id == "ENSG00000187954" ~ "zinc ion binding",
+      ensembl_id == "ENSG00000238222" ~ "protein ubiquitination",
+      ensembl_id == "ENSG00000010318" ~ "metal ion binding",
+      ensembl_id == "ENSG00000167257" ~ "ubiquitin-protein transferase activity",
+      ensembl_id == "ENSG00000189051" ~ "metal ion binding",
+      ensembl_id == "ENSG00000233198" ~ "metal ion binding",
+      ensembl_id == "ENSG00000034063" ~ "ubiquitin-dependent protein catabolic process",
+      ensembl_id == "ENSG00000251694" ~ "cysteine-type deubiquitinase activity",
+      TRUE ~ go_term
+    ),
+    go_category = case_when(
+      ensembl_id == "ENSG00000131982" ~ "BP",
+      ensembl_id == "ENSG00000267741" ~ "BP",
+      ensembl_id == "ENSG00000198354" ~ "CC",
+      ensembl_id == "ENSG00000226372" ~ "CC",
+      ensembl_id == "ENSG00000189186" ~ "CC",
+      ensembl_id == "ENSG00000164616" ~ "BP",
+      ensembl_id == "ENSG00000187954" ~ "MF",
+      ensembl_id == "ENSG00000238222" ~ "BP",
+      ensembl_id == "ENSG00000010318" ~ "MF",
+      ensembl_id == "ENSG00000167257" ~ "MF",
+      ensembl_id == "ENSG00000189051" ~ "MF",
+      ensembl_id == "ENSG00000233198" ~ "MF",
+      ensembl_id == "ENSG00000034063" ~ "BP",
+      ensembl_id == "ENSG00000251694" ~ "MF",
+      TRUE ~ go_id  # Keeps existing value if no condition is matched
+    )
+  )
+
+# Merge with previous df
+raw_ub_glist_go_bp_df <- bind_rows(raw_ub_glist_go_bp_df, manual_annot_df) %>% 
+  dplyr::distinct()
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+#4 Define categories and parents
+
+# Categories (as character)
+ub_categories <- c("ubiquitination", "deubiquitination", "ubiquitin_neutral", "ubiquitin_other")
+# ub_categories <- setNames(as.list(ub_categories), ub_categories)
+
+# Parents (as character)
+ub_parent_terms <- c("GO:0016567", "GO:0016579", "GO:0006511", "GO:0010499", "GO:0010992", "GO:0070086", "GO:0120323", "GO:0031397", "GO:0031398", "GO:2000059", "GO:2000060", "GO:0046872", "GO:0004842", "GO:0051865", "GO:0000209", "GO:0006513")
+# "GO:0051438" --> removed because regulation can be positive or negative
+# ub_parent_terms <- setNames(as.list(ub_parent_terms), ub_parent_terms)
+
+# Children (as list)
+all_offspring_bp <- as.list(GOBPOFFSPRING) # Get the offspring terms for BP
+all_offspring_mf <- as.list(GOMFOFFSPRING) # Get the offspring terms for MF
+parent2child_list <- map(ub_parent_terms, function(x) {
+  bp_offspring <- all_offspring_bp[[x]]
+  mf_offspring <- all_offspring_mf[[x]]
+  
+  # Check if BP offspring exists and has elements
+  if (!is.null(bp_offspring) && length(bp_offspring) > 0) {
+    # BP has elements, return it along with the parent itself
+    return(c(x, unlist(bp_offspring)))
+  } else if (!is.null(bp_offspring) && length(bp_offspring) == 0) {
+    # BP is empty, return the parent itself
+    return(list(x))
+  } else if (!is.null(mf_offspring) && length(mf_offspring) > 0) {
+    # BP is NULL, but MF has elements, return MF along with the parent itself
+    return(c(x, unlist(mf_offspring)))
+  } else {
+    # Both BP is NULL and MF is empty or NULL, return the parent itself
+    return(list(x))
+  }
+})
+names(parent2child_list) <- ub_parent_terms
+
+# Add child terms manually to previously defined parents
+parent2child_list[["GO:0016567"]] <- c(parent2child_list[["GO:0016567"]], "GO:0080008")
+parent2child_list[["GO:0016579"]] <- c(parent2child_list[["GO:0016579"]], "GO:0004843")
+
+#5 Build DB with Category > Parent > Children
+
+ub_db <- list(
+  ubiquitination = list(
+    `GO:0016567` = parent2child_list[["GO:0016567"]],
+    `GO:0010992` = parent2child_list[["GO:0010992"]],
+    `GO:0006511` = parent2child_list[["GO:0006511"]],
+    `GO:0070086` = parent2child_list[["GO:0070086"]],
+    `GO:0120323` = parent2child_list[["GO:0120323"]],
+    `GO:0031398` = parent2child_list[["GO:0031398"]],
+    `GO:0051865` = parent2child_list[["GO:0051865"]],
+    `GO:0000209` = parent2child_list[["GO:0000209"]],
+    `GO:0006513` = parent2child_list[["GO:0006513"]],
+    `GO:2000060` = parent2child_list[["GO:2000060"]]
+  ),
+  deubiquitination = list(
+    `GO:0016579` = parent2child_list[["GO:0016579"]],
+    `GO:0031397` = parent2child_list[["GO:0031397"]],
+    `GO:2000059` = parent2child_list[["GO:2000059"]]
+  ),
+  ubiquitin_neutral = list(
+    `GO:0004842` = parent2child_list[["GO:0004842"]] # MF
+  ),
+  ubiquitin_other = list(
+    `GO:0010499` = parent2child_list[["GO:0010499"]],
+    `GO:0046872` = parent2child_list[["GO:0046872"]] # MF
+  )
+)
+
+#6 Make a data.frame with ensembl_id, go_category, category, go_parent_id, go_parent_term, go_id, go_term
+
+# Initialize an empty list to hold the mapping
+go_mapping <- list()
+
+# Iterate through each category in ub_db
+for (category in names(ub_db)) {
+  # Iterate through each parent within a category
+  for (parent_id in names(ub_db[[category]])) {
+    # Iterate through each child within a parent
+    children_ids <- ub_db[[category]][[parent_id]]
+    for (child_id in children_ids) {
+      # Append the category and parent information to the mapping list for each child
+      if (!is.null(go_mapping[[child_id]])) {
+        go_mapping[[child_id]] <- unique(c(go_mapping[[child_id]], paste(parent_id, category, sep = "|")))
+      } else {
+        go_mapping[[child_id]] <- paste(parent_id, category, sep = "|")
+      }
+    }
+  }
+}
+
+# Convert the mapping list to a data.frame for easier manipulation
+go_mapping_df <- stack(go_mapping)
+names(go_mapping_df) <- c("info", "go_id")
+
+# Split info into go_parent_id and category
+go_mapping_df <- go_mapping_df %>%
+  tidyr::separate(info, into = c("go_parent_id", "category"), sep = "\\|")
+
+# Join the mapping information back to the original data.frame
+final_df <- raw_ub_glist_go_bp_df %>%
+  left_join(go_mapping_df, by = "go_id")
+
+#7 Handle cases where a child belongs to multiple parents
+final_df <- final_df %>%
+  dplyr::group_by(ensembl_id, go_category, go_id, go_term) %>%
+  dplyr::summarise(go_parent_id = paste(unique(go_parent_id), collapse = ", "),
+            category = paste(unique(category), collapse = ", "),
+            .groups = 'drop')
+
+# Arrange columns in the desired order
+final_df <- final_df %>%
+  dplyr::select(ensembl_id, go_category, category, go_parent_id, go_term, go_id)
+
+# Converting NAs and ordering columns
+annot_ub_glist_df <- final_df %>% 
+  dplyr::mutate(across(everything(), ~na_if(.x, "NA"))) %>% 
+  dplyr::select(ensembl_id, 
+                go_category, 
+                category, 
+                go_parent_id, 
+                go_id, 
+                go_term)
+
+# DEBUG: check category
+# rows_with_multiple_categories <- annot_ub_glist_df %>%
+#   dplyr::filter(grepl(",", category))
+
+# DEBUG: check go_parent_id
+# rows_with_multiple_parents <- annot_ub_glist_df %>%
+#   dplyr::filter(grepl(",", go_parent_id))
+
+# Amend those that have multiple values in category and go_parent_id
+annot_ub_glist_df <- annot_ub_glist_df %>%
+  dplyr::mutate(
+    # Check if 'category' contains multiple values and update accordingly
+    category = ifelse(grepl(",", category) & 
+                      (grepl("deubiquitination", go_term) | grepl("negative regulation", go_term) & grepl("ubiquitin", go_term)),
+                      "deubiquitination",
+                      ifelse(grepl(",", category) & 
+                             (grepl("ubiquitination", go_term) & !grepl("deubiquitination", go_term) | grepl("positive regulation", go_term) & grepl("ubiquitin", go_term)),
+                             "ubiquitination",
+                                   category)),
+    # Check if 'go_parent_id' contains multiple values and update accordingly
+    go_parent_id = ifelse(grepl(",", go_parent_id) & grepl("GO:0016579", go_parent_id),
+                          "GO:0016579",
+                          ifelse(grepl(",", go_parent_id) & grepl("GO:2000059", go_parent_id),
+                                 "GO:2000059",
+                                 ifelse(grepl(",", go_parent_id) & grepl("GO:0031397", go_parent_id),
+                                        "GO:0031397",
+                                        ifelse(grepl(",", go_parent_id) & grepl("GO:0031398", go_parent_id),
+                                               "GO:0031398",
+                                               ifelse(grepl(",", go_parent_id) & grepl("GO:2000060", go_parent_id),
+                                                     "GO:2000060",
+                                                     ifelse(grepl(",", go_parent_id) & grepl("GO:0031398", go_parent_id),
+                                                     "GO:0031398",
+                                                     ifelse(grepl(",", go_parent_id) & grepl("GO:0051865", go_parent_id),
+                                                           "GO:0051865",
+                                                           ifelse(grepl(",", go_parent_id) & grepl("GO:0000209", go_parent_id),
+                                                                 "GO:0000209",
+                                                                 ifelse(grepl(",", go_parent_id) & grepl("GO:0006513", go_parent_id),
+                                                                 "GO:0006513",
+                                                                 go_parent_id)))))))))
+  )
+
+annot_ub_glist_df <- annot_ub_glist_df %>%
+  dplyr::mutate(go_parent_term = map_chr(go_parent_id, function(id) {
+    # Access the term for the given GO ID
+    term <- tryCatch({
+      eval(parse(text = paste0("all_go_terms$`", id, "`@Term")))
+    }, error = function(e) NA)
+    return(term)
+  }))
+
+#Re-arrange
+annot_ub_glist_df <- annot_ub_glist_df %>%
+  dplyr::select(ensembl_id, go_category, category,
+                go_parent_id, go_parent_term,
+                go_id, go_term)
+
+# Identify genes that don't have a parent
+ensembl_ids_all_na_category <- annot_ub_glist_df %>%
+  dplyr::group_by(ensembl_id) %>%
+  dplyr::summarize(all_na_in_category = all(is.na(category)), .groups = 'drop') %>%
+  dplyr::filter(all_na_in_category) %>%
+  dplyr::pull(ensembl_id)
+
+final_df_filtered_all_na <- annot_ub_glist_df %>%
+  filter(ensembl_id %in% ensembl_ids_all_na_category)
+
+# ensembl_ids_with_non_na_category <- annot_ub_glist_df %>%
+#   dplyr::group_by(ensembl_id) %>%
+#   dplyr::summarize(any_non_na_in_category = any(!is.na(category)), .groups = 'drop') %>%
+#   dplyr::filter(any_non_na_in_category) %>%
+#   dplyr::pull(ensembl_id)
+# 
+# final_df_filtered_non_na <- annot_ub_glist_df %>%
+#   filter(ensembl_id %in% ensembl_ids_with_non_na_category)
+
+# Here I lose 91 genes because no parent was found. Collect them for exploration.
+lost_genes4 <- final_df_filtered_all_na %>% 
+  dplyr::distinct(ensembl_id) %>% 
+  dplyr::pull(ensembl_id)
+
+#8 Get more parent terms
+
+# Get the most frequent go_id, go_term pairs for those genes that I could not find parent
+most_frequent_pairs <- final_df_filtered_all_na %>%
+  dplyr::group_by(go_id, go_term) %>%
+  dplyr::summarise(count = n()) %>%
+  dplyr::ungroup() %>%
+  dplyr::arrange(desc(count))
+
+# Update ub_parent_terms with new parents
+new_ub_parent_terms = c("GO:0006355", "GO:0006508", "GO:0032446", "GO:0051726", "GO:0006325")
+ub_parent_terms <- c(ub_parent_terms, new_ub_parent_terms)
+
+# Map children to new parents
+parent2child_list2 <- map(new_ub_parent_terms, function(x) {
+  bp_offspring <- all_offspring_bp[[x]]
+  
+  # Check if BP offspring exists and has elements
+  if (!is.null(bp_offspring) && length(bp_offspring) > 0) {
+    # BP has elements, return it along with the parent itself
+    return(c(x, unlist(bp_offspring)))
+  } else {
+    # BP is empty, return the parent itself
+    return(list(x))
+  }
+})
+names(parent2child_list2) <- new_ub_parent_terms
+
+# Update ub_db
+ub_db$ubiquitin_other <- c(ub_db$ubiquitin_other,
+                                 list(`GO:0006355` = parent2child_list2[["GO:0006355"]]),
+                                 list(`GO:0006508` = parent2child_list2[["GO:0006508"]]),
+                                 list(`GO:0032446` = parent2child_list2[["GO:0032446"]]),
+                                 list(`GO:0051726` = parent2child_list2[["GO:0051726"]]),
+                                 list(`GO:0006325` = parent2child_list2[["GO:0006325"]]))
+
+# Map my ub genes with parents
+# Initialize an empty list to hold the mapping
+go_mapping2 <- list()
+
+# Iterate only through the new elements in the ubiquitin_other list
+for (parent_id in new_ub_parent_terms) {
+  # Access children directly from parent2child_list2 for the new elements
+  children_ids <- parent2child_list2[[parent_id]]
+  for (child_id in children_ids) {
+    # Append the category and parent information to the mapping list for each child
+    if (!is.null(go_mapping2[[child_id]])) {
+      go_mapping2[[child_id]] <- unique(c(go_mapping2[[child_id]], paste(parent_id, "ubiquitin_other", sep = "|")))
+    } else {
+      go_mapping2[[child_id]] <- paste(parent_id, "ubiquitin_other", sep = "|")
+    }
+  }
+}
+
+# Convert the mapping list to a data.frame for easier manipulation
+go_mapping_df2 <- stack(go_mapping2)
+names(go_mapping_df2) <- c("info", "go_id")
+
+# Split info into go_parent_id and category
+go_mapping_df2 <- go_mapping_df2 %>%
+  tidyr::separate(info, into = c("go_parent_id", "category"), sep = "\\|")
+
+# DEBUG
+# non_unique_go_ids <- go_mapping_df2 %>%
+#   group_by(go_id) %>%
+#   summarise(count = n()) %>%
+#   filter(count > 1) %>%
+#   select(go_id)
+
+# Join the mapping information back to the lost_genes4 data.frame. The logic here is that I map the new parents only to those genes where I could not find a ubiquitin-related GO term.
+final_df2 <- final_df_filtered_all_na %>%
+  left_join(go_mapping_df2, by = "go_id") %>% 
+  dplyr::rename(category = category.x,
+                go_parent_id = go_parent_id.x)
+
+# Use coalesce to update the original columns and then drop the .y columns
+for (col in c("category", "go_parent_id")) {
+  final_df2[[col]] <- coalesce(final_df2[[col]], final_df2[[paste0(col, ".y")]])
+  final_df2[[paste0(col, ".y")]] <- NULL  # Drop the .y column
+}
+
+# No cases where a child belongs to multiple parents
+
+# Arrange columns in the desired order
+final_df2 <- final_df2 %>%
+  dplyr::select(ensembl_id, go_category, category, go_parent_id, go_id, go_term)
+
+# Merge with annot_ub_glist_df
+annot_ub_glist_df2 <- annot_ub_glist_df %>%
+  dplyr::left_join(final_df2, by = c("ensembl_id", "go_id"))
+
+# Compress duplicated columns generated by left_join
+annot_ub_glist_df2 <- annot_ub_glist_df2 %>%
+  # Operate on each row independently
+  rowwise() %>%
+  # For each of the column pairs, combine information appropriately
+  dplyr::mutate(
+    go_category = ifelse(!is.na(go_category.x) & !is.na(go_category.y) & go_category.x != go_category.y,
+                         paste(go_category.x, go_category.y, sep = ","),
+                         coalesce(go_category.x, go_category.y)),
+    category = ifelse(!is.na(category.x) & !is.na(category.y) & category.x != category.y,
+                      paste(category.x, category.y, sep = ","),
+                      coalesce(category.x, category.y)),
+    go_parent_id = ifelse(!is.na(go_parent_id.x) & !is.na(go_parent_id.y) & go_parent_id.x != go_parent_id.y,
+                          paste(go_parent_id.x, go_parent_id.y, sep = ","),
+                          coalesce(go_parent_id.x, go_parent_id.y)),
+    go_term = ifelse(!is.na(go_term.x) & !is.na(go_term.y) & go_term.x != go_term.y,
+                     paste(go_term.x, go_term.y, sep = ","),
+                     coalesce(go_term.x, go_term.y))
+  ) %>%
+  # Now that we've combined the .x and .y columns, select and rename to drop the .x and .y suffixes
+  dplyr::select(-ends_with(".x"), -ends_with(".y")) %>%
+  # Ungroup to stop rowwise operation
+  ungroup()
+
+# DEBUG: check category
+# rows_with_multiple_categories2 <- annot_ub_glist_df2 %>%
+#   dplyr::filter(grepl(",", category))
+
+# DEBUG: check go_parent_id
+# rows_with_multiple_parents2 <- annot_ub_glist_df2 %>%
+#   dplyr::filter(grepl(",", go_parent_id))
+
+# No cases where a child belongs to multiple parents
+
+annot_ub_glist_df2 <- annot_ub_glist_df2 %>%
+  dplyr::mutate(go_parent_term = map_chr(go_parent_id, function(id) {
+    # Access the term for the given GO ID
+    term <- tryCatch({
+      eval(parse(text = paste0("all_go_terms$`", id, "`@Term")))
+    }, error = function(e) NA)
+    return(term)
+  }))
+
+#Re-arrange
+annot_ub_glist_df2 <- annot_ub_glist_df2 %>%
+  dplyr::select(ensembl_id, go_category, category,
+                go_parent_id, go_parent_term,
+                go_id, go_term)
+
+# Identify genes that don't have a parent
+ensembl_ids_all_na_category2 <- annot_ub_glist_df2 %>%
+  dplyr::group_by(ensembl_id) %>%
+  dplyr::summarize(all_na_in_category = all(is.na(category)), .groups = 'drop') %>%
+  dplyr::filter(all_na_in_category) %>%
+  dplyr::pull(ensembl_id)
+
+final_df_filtered_all_na2 <- annot_ub_glist_df2 %>%
+  filter(ensembl_id %in% ensembl_ids_all_na_category2)
+  
+# Here I lose 29 genes because no parent was found. Collect them for exploration and repeat process.
+lost_genes5 <- final_df_filtered_all_na2 %>% 
+  dplyr::distinct(ensembl_id) %>% 
+  dplyr::pull(ensembl_id)
+
+# 645/674 genes remaining. 29 genes lost in total. Here I used GRCh38 + GRCh37 + PFAM + Manual + More parents
+#9 Repeat process to include more parents
+
+# Get the most frequent go_id, go_term pairs for those genes that I could not find parent
+most_frequent_pairs2 <- final_df_filtered_all_na2 %>%
+  dplyr::group_by(go_id, go_term) %>%
+  dplyr::summarise(count = n()) %>%
+  dplyr::ungroup() %>%
+  dplyr::arrange(desc(count))
+
+# Update ub_parent_terms with new parents
+new_ub_parent_terms2 = c("GO:0006468", "GO:0006396", "GO:0007399", "GO:0006623", "GO:0007283", "GO:0006906", "GO:0009267", "GO:0032007", "GO:0000226", "GO:0006414", "GO:0007507", "GO:0007160", "GO:0043086", "GO:0007605", "GO:0097049", "GO:0099536", "GO:0030154", "GO:0030163", "GO:0031331")
+ub_parent_terms <- c(ub_parent_terms, new_ub_parent_terms2)
+
+# DEBUG
+# count_not_in_vector <- final_df_filtered_all_na2 %>%
+#   dplyr::filter(!(go_id %in% new_ub_parent_terms2)) %>%
+#   nrow()
+
+# Map children to new parents
+parent2child_list3 <- map(new_ub_parent_terms2, function(x) {
+  bp_offspring <- all_offspring_bp[[x]]
+  
+  # Check if BP offspring exists and has elements
+  if (!is.null(bp_offspring) && length(bp_offspring) > 0) {
+    # BP has elements, return it along with the parent itself
+    return(c(x, unlist(bp_offspring)))
+  } else {
+    # BP is empty, return the parent itself
+    return(list(x))
+  }
+})
+names(parent2child_list3) <- new_ub_parent_terms2
+
+# Update ub_db
+ub_db$ubiquitin_other <- c(ub_db$ubiquitin_other,
+                                 list(`GO:0006355` = parent2child_list3[["GO:0006468"]]),
+                                 list(`GO:0032446` = parent2child_list3[["GO:0006396"]]),
+                                 list(`GO:0051726` = parent2child_list3[["GO:0007399"]]),
+                                 list(`GO:0006325` = parent2child_list3[["GO:0006623"]]),
+                                 list(`GO:0007283` = parent2child_list3[["GO:0007283"]]),
+                                 list(`GO:0006906` = parent2child_list3[["GO:0006906"]]),
+                                 list(`GO:0009267` = parent2child_list3[["GO:0009267"]]),
+                                 list(`GO:0032007` = parent2child_list3[["GO:0032007"]]),
+                                 list(`GO:0000226` = parent2child_list3[["GO:0000226"]]),
+                                 list(`GO:0006414` = parent2child_list3[["GO:0006414"]]),
+                                 list(`GO:0007507` = parent2child_list3[["GO:0007507"]]),
+                                 list(`GO:0007160` = parent2child_list3[["GO:0007160"]]),
+                                 list(`GO:0043086` = parent2child_list3[["GO:0043086"]]),
+                                 list(`GO:0007605` = parent2child_list3[["GO:0007605"]]),
+                                 list(`GO:0097049` = parent2child_list3[["GO:0097049"]]),
+                                 list(`GO:0099536` = parent2child_list3[["GO:0099536"]]),
+                                 list(`GO:0030154` = parent2child_list3[["GO:0030154"]]),
+                                 list(`GO:0030163` = parent2child_list3[["GO:0030163"]]),
+                                 list(`GO:0031331` = parent2child_list3[["GO:0031331"]]))
+
+# Map my ub genes with parents
+# Initialize an empty list to hold the mapping
+go_mapping3 <- list()
+
+# Iterate only through the new elements in the ubiquitin_other list
+for (parent_id in new_ub_parent_terms2) {
+  # Access children directly from parent2child_list3 for the new elements
+  children_ids <- parent2child_list3[[parent_id]]
+  for (child_id in children_ids) {
+    # Append the category and parent information to the mapping list for each child
+    if (!is.null(go_mapping3[[child_id]])) {
+      go_mapping3[[child_id]] <- unique(c(go_mapping3[[child_id]], paste(parent_id, "ubiquitin_other", sep = "|")))
+    } else {
+      go_mapping3[[child_id]] <- paste(parent_id, "ubiquitin_other", sep = "|")
+    }
+  }
+}
+
+# Convert the mapping list to a data.frame for easier manipulation
+go_mapping_df3 <- stack(go_mapping3)
+names(go_mapping_df3) <- c("info", "go_id")
+
+# Split info into go_parent_id and category
+go_mapping_df3 <- go_mapping_df3 %>%
+  tidyr::separate(info, into = c("go_parent_id", "category"), sep = "\\|")
+
+# DEBUG
+# non_unique_go_ids <- go_mapping_df3 %>%
+#   group_by(go_id) %>%
+#   summarise(count = n()) %>%
+#   filter(count > 1) %>%
+#   select(go_id)
+
+# Join the mapping information back to the lost_genes4 data.frame. The logic here is that I map the new parents only to those genes where I could not find a ubiquitin-related GO term.
+final_df3 <- final_df_filtered_all_na2 %>%
+  left_join(go_mapping_df3, by = "go_id") %>% 
+  dplyr::rename(category = category.x,
+                go_parent_id = go_parent_id.x)
+
+# Use coalesce to update the original columns and then drop the .y columns
+for (col in c("category", "go_parent_id")) {
+  final_df3[[col]] <- coalesce(final_df3[[col]], final_df3[[paste0(col, ".y")]])
+  final_df3[[paste0(col, ".y")]] <- NULL  # Drop the .y column
+}
+
+# No cases where a child belongs to multiple parents
+
+# Arrange columns in the desired order
+final_df3 <- final_df3 %>%
+  dplyr::select(ensembl_id, go_category, category, go_parent_id, go_id, go_term)
+
+# Merge with annot_ub_glist_df
+annot_ub_glist_df3 <- annot_ub_glist_df2 %>%
+  dplyr::left_join(final_df3, by = c("ensembl_id", "go_id"))
+
+# Compress duplicated columns generated by left_join
+annot_ub_glist_df3 <- annot_ub_glist_df3 %>%
+  # Operate on each row independently
+  rowwise() %>%
+  # For each of the column pairs, combine information appropriately
+  dplyr::mutate(
+    go_category = ifelse(!is.na(go_category.x) & !is.na(go_category.y) & go_category.x != go_category.y,
+                         paste(go_category.x, go_category.y, sep = ","),
+                         coalesce(go_category.x, go_category.y)),
+    category = ifelse(!is.na(category.x) & !is.na(category.y) & category.x != category.y,
+                      paste(category.x, category.y, sep = ","),
+                      coalesce(category.x, category.y)),
+    go_parent_id = ifelse(!is.na(go_parent_id.x) & !is.na(go_parent_id.y) & go_parent_id.x != go_parent_id.y,
+                          paste(go_parent_id.x, go_parent_id.y, sep = ","),
+                          coalesce(go_parent_id.x, go_parent_id.y)),
+    go_term = ifelse(!is.na(go_term.x) & !is.na(go_term.y) & go_term.x != go_term.y,
+                     paste(go_term.x, go_term.y, sep = ","),
+                     coalesce(go_term.x, go_term.y))
+  ) %>%
+  # Now that we've combined the .x and .y columns, select and rename to drop the .x and .y suffixes
+  dplyr::select(-ends_with(".x"), -ends_with(".y")) %>%
+  # Ungroup to stop rowwise operation
+  ungroup()
+
+# DEBUG: check category
+# rows_with_multiple_categories3 <- annot_ub_glist_df3 %>%
+#   dplyr::filter(grepl(",", category))
+
+# DEBUG: check go_parent_id
+# rows_with_multiple_parents3 <- annot_ub_glist_df3 %>%
+#   dplyr::filter(grepl(",", go_parent_id))
+
+# No cases with multiple parents
+
+annot_ub_glist_df3 <- annot_ub_glist_df3 %>%
+  dplyr::mutate(go_parent_term = map_chr(go_parent_id, function(id) {
+    # Access the term for the given GO ID
+    term <- tryCatch({
+      eval(parse(text = paste0("all_go_terms$`", id, "`@Term")))
+    }, error = function(e) NA)
+    return(term)
+  }))
+
+#Re-arrange
+annot_ub_glist_df3 <- annot_ub_glist_df3 %>%
+  dplyr::select(ensembl_id, go_category, category,
+                go_parent_id, go_parent_term,
+                go_id, go_term)
+
+# Identify genes that don't have a parent
+ensembl_ids_all_na_category3 <- annot_ub_glist_df3 %>%
+  dplyr::group_by(ensembl_id) %>%
+  dplyr::summarize(all_na_in_category = all(is.na(category)), .groups = 'drop') %>%
+  dplyr::filter(all_na_in_category) %>%
+  dplyr::pull(ensembl_id)
+
+final_df_filtered_all_na3 <- annot_ub_glist_df3 %>%
+  filter(ensembl_id %in% ensembl_ids_all_na_category3)
+  
+# Here I lose 2 genes because no parent was found. The only parent found is "biological_process", which is too generic.
+lost_genes5 <- final_df_filtered_all_na3 %>% 
+  dplyr::distinct(ensembl_id) %>% 
+  dplyr::pull(ensembl_id)
+
+# 672/674 genes remaining. 2 genes lost in total. Here I used GRCh38 + GRCh37 + PFAM + Manual + More parents x 2
+```
+
+There are `r length(ub_ensembl_ids)` ubiquitin-related genes in total from the file.
+
+There are `r nrow(ub_godb_bp_df)` GO BP terms related to ubiquitin in total (from GO.db). Filter using grep("ubiquitin").
+
+This is my selected GO terms related to ubiquitin to build the Gene Sets DB: `r ub_parent_terms`.
+
+The resulting data.frame with annotated go_terms has more rows than the initial ubiquitin gene list because a single gene can be part of multiple GO terms (BP).
+
+When I annotate the genes with GO terms, I lose some genes: `r nrow(raw_ub_glist_go_bp_df %>% dplyr::select(ensembl_id) %>% distinct())` vs `r length(ub_ensembl_ids)` (lost `r length(lost_genes)` genes). This is because no GO term was associated to these genes.
+
+Seeing this, I had a look at some of the genes that were lost. I saw that for most of them, no GO annotation could be found. However, for some I could see that grch37 had a GO annotation while grch38 didn't. 
+
+So I did a test: annotate with biomaRt instead of mygene and check how many genes were not annotated then. Unfortunately, even more genes were lost. In conclusion, it is better to annotate GO terms using the grch38 assembly.
+
+The ones that had annotation for GO BP in grch37 were related to proteolysis (ENSG00000154359, ENSG00000170500, ENSG00000175556), apoptotic regulation (ENSG00000163098, ENSG00000056661), autoubiquitination (ENSG00000121848), ubiquitin-dependent protein catabolic process (ENSG00000242013, ENSG00000166348, ENSG00000161133). I annotated them using biomaRt. Summary: grch38 + grch37.
+
+That led me to have `r length(lost_genes2)` missing genes. So, I tried extracting the PFAM for those genes and then annotating the PFAM with GO BP terms and Ensembl Gene IDs. Then I mapped this results to the missing genes by PFAM, assuming that those genes which share PFAM domain will be involved in the same biological process. Now I have some of the missing genes with GO terms based on their PFAM.
+
+After that I still had `r length(lost_genes3)` missing genes that I annotated manually.
+
+Later I handled those cases that had multiple categories (i.e. ubiquitination and deubiquitination) and multiple parent ids. This happens because the negative regulation processes have "protein ubiquitination" as a parent GO term, so I removed the ubiquitin category and related parent terms from those ensembl ids. It also happens that positive regulation processes have "protein ubiquitination" as parent GO term, so I handled those as well.
+
+When I annotate genes with parent GO terms, I lose `r length(lost_genes4)` genes because no GO parent was found. I checked some of them and they don't seem to have relationship with protein ubiquitination, but they perform other ubiquitin-related processes (e.g. cell cycle control). They are involved in other important processes such as DNA repair, apoptotic regulation, etc.
+
+So I defined some more parent terms for them and repeated the process. So far I’ve added 5 more GO parent terms. With that, I achieved that I’m only missing `r length(lost_genes5)` genes from the original list which still don’t have a parent GO term. So a total of `r length(lost_genes4) - length(lost_genes5)` genes were rescued. 
+
+I added 3 more GO parent terms to split the "protein ubiquitination" as it had 465 genes associated with it.
+
+## Resulting tables and FORA for parents
+
+```{r, warning=FALSE, message=FALSE}
+# Remove unannotated GO terms
+final_ub_db <- annot_ub_glist_df3 %>% 
+  dplyr::filter(!is.na(go_parent_id)) %>% 
+  dplyr::distinct()
+
+# Check if any genes belong to 2 different categories
+# Group by ensembl_id and summarize the unique categories and related GO details
+ensembl_category_details <- final_ub_db %>%
+  group_by(ensembl_id) %>%
+  summarise(
+    unique_categories = n_distinct(category),
+    categories = toString(unique(category)),
+    go_ids = toString(unique(go_id)),
+    go_terms = toString(unique(go_term)),
+    go_parent_ids = toString(unique(go_parent_id)),
+    go_parent_terms = toString(unique(go_parent_term))
+  ) %>%
+  ungroup()
+
+# Filter to find ensembl_id with more than one unique category
+ensembl_multiple_categories <- ensembl_category_details %>%
+  filter(unique_categories > 1)
+
+# Manually curate those genes
+preferred_categories <- data.frame(
+  ensembl_id = c("ENSG00000077254", "ENSG00000078747", "ENSG00000101557", "ENSG00000111667", "ENSG00000124486", "ENSG00000132109", "ENSG00000136014", "ENSG00000136536", "ENSG00000140464", "ENSG00000154124", "ENSG00000155313", "ENSG00000156463", "ENSG00000157119", "ENSG00000163840", "ENSG00000170185", "ENSG00000171617", "ENSG00000187555", "ENSG00000204599"),
+  preferred_category = c("deubiquitination", "ubiquitination", "ubiquitination", "deubiquitination", "deubiquitination", "ubiquitination", "deubiquitination", "ubiquitination", "ubiquitination", "deubiquitination", "deubiquitination", "ubiquitination", "ubiquitination", "ubiquitination", "deubiquitination", "ubiquitin_other", "deubiquitination", "ubiquitination")
+)
+
+# Join the preference information and mark preferred rows
+final_ub_db_pref <- final_ub_db %>%
+  dplyr::left_join(preferred_categories, by = "ensembl_id", suffix = c("", ".pref")) %>%
+  dplyr::mutate(is_preferred = category == preferred_category)
+
+# Filter out non-preferred categories where applicable
+final_ub_db_df <- final_ub_db_pref %>%
+  dplyr::filter(is_preferred | is.na(preferred_category)) %>%
+  dplyr::select(-preferred_category, -is_preferred)  # Remove the helper columns
+
+# Save the ub_db in an RDS file
+ub_db_csv_path <- file.path(results_ubi_db_path, "ub_db.rds")
+saveRDS(final_ub_db_df, file = ub_db_csv_path)
+
+# # DEBUG
+# # Optionally, check how many rows were removed for each gene
+# final_marked %>%
+#   group_by(ensembl_id) %>%
+#   summarise(
+#     Total = n(),
+#     Kept = sum(is_preferred | is.na(preferred_category)),
+#     Removed = Total - Kept
+#   ) %>%
+#   print()
+```
+
+At the end, I manually curated the categories for 18 genes because they were annotated with 2 different categories. I checked the info from UniProt to decide which category they belong to.
+
+```{r, warning=FALSE, message=FALSE}
+# Count how many genes each category has
+final_category_gene_count <- final_ub_db_df %>% 
+  dplyr::group_by(category) %>%
+  dplyr::summarise(ensembl_id_count = n_distinct(ensembl_id)) %>%
+  dplyr::arrange(desc(ensembl_id_count))
+
+# Add total count row
+total_count <- sum(final_category_gene_count$ensembl_id_count)
+summary_row <- tibble(category = "Total", ensembl_id_count = total_count)
+final_category_gene_count <- bind_rows(final_category_gene_count, summary_row)
+
+# Count how many genes each parent has
+final_parent_gene_count <- final_ub_db_df %>% 
+  dplyr::group_by(go_parent_id, go_parent_term) %>%
+  dplyr::summarise(ensembl_id_count = n_distinct(ensembl_id)) %>%
+  dplyr::arrange(desc(ensembl_id_count))
+
+# Display
+datatable(final_category_gene_count, 
+          extensions = c('Buttons', 
+                         'FixedColumns'), 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            fixedColumns = list(leftColumns = 1), # Freeze the first column
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Count of genes included in each ubiquitin category."
+        )
+
+datatable(final_parent_gene_count, 
+          extensions = c('Buttons', 
+                         'FixedColumns'), 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            fixedColumns = list(leftColumns = 1), # Freeze the first column
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Count of genes included in each ubiquitin go parent term."
+        )
+```
+
+NOTE: The category table has unique Ensembl gene IDs, but the parent table does not, since it can happen that the same gene is annotated to different parents.
+
+## FORA using ub_db
+
+```{r, message=FALSE, warning=FALSE}
+#10 Perform FORA analysis
+# Define paths
+fora_results_all_csv_path <- file.path(results_ubi_db_path, "fora_results_ubiquitin_all.csv")
+fora_results_nonsyn_csv_path <- file.path(results_ubi_db_path, "fora_results_ubiquitin_nonsyn.csv")
+fora_results_lof_csv_path <- file.path(results_ubi_db_path, "fora_results_ubiquitin_lof.csv")
+
+# Create gene_sets_df with a list of ensembl_id for each go_parent_id
+gene_sets_df <- final_ub_db_df %>%
+  dplyr::group_by(go_parent_id) %>%
+  dplyr::summarise(ensembl_id = list(ensembl_id), .groups = 'drop')
+
+# Adding go_parent_term
+gene_sets_df <- gene_sets_df %>%
+  dplyr::mutate(go_parent_term = map_chr(go_parent_id, function(id) {
+    # Access the term for the given GO ID
+    term <- tryCatch({
+      eval(parse(text = paste0("all_go_terms$`", id, "`@Term")))
+    }, error = function(e) NA)
+    return(term)
+  })) %>% 
+  dplyr::select(go_parent_term, ensembl_id, -go_parent_id)
+
+# Convert the dataframe to a named list
+gene_sets_list <- setNames(gene_sets_df$ensembl_id, gene_sets_df$go_parent_term)
+
+# Perform FORA analysis for Ubiquitin Gene Sets
+# perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, gene_sets_list=gene_sets_list)
+
+# Load fora results
+fora_results_ubiquitin_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
+fora_results_ubiquitin_nonsyn_df <- read.csv(fora_results_nonsyn_csv_path, header = TRUE)[ , -1]
+fora_results_ubiquitin_lof_df <- read.csv(fora_results_lof_csv_path, header = TRUE)[ , -1]
+```
+
+<!-- ## Visualization: Top Custom Ubiquitin GS across samples stratified by response (All mutations) -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=6} -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_all_plot_path <- file.path(figures_ubi_db_path, -->
+<!--                               "mm909_ubiquitin_all_plot.png") -->
+
+<!-- mm909_ubiquitin_all_plot <- plot_top5(response_df, fora_results_ubiquitin_all_df, mm909_ubiquitin_all_plot_path, "FORA with top Custom Ubiquitin GS across samples (All mutations)", "Top Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_all_plot) -->
+<!-- ``` -->
+
+<!-- ### Visualization: Top Custom Ubiquitin GS across samples stratified by response (Nonsyn mutations) -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=6} -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_nonsyn_plot_path <- file.path(figures_ubi_db_path, -->
+<!--                               "mm909_ubiquitin_nonsyn_plot.png") -->
+
+<!-- mm909_ubiquitin_nonsyn_plot <- plot_top5(response_df, fora_results_ubiquitin_nonsyn_df, mm909_ubiquitin_nonsyn_plot_path, "FORA with top Custom Ubiquitin GS across samples (Nonsyn mutations)", "Top Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_nonsyn_plot) -->
+<!-- ``` -->
+
+### Visualization: Top Custom Ubiquitin GS across samples stratified by response (LoF mutations)
+
+```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=10}
+# Define output path
+mm909_ubiquitin_lof_plot_path <- file.path(figures_ubi_db_path,
+                              "mm909_ubiquitin_lof_plot.png")
+
+mm909_ubiquitin_lof_plot <- bubble_plot_all(response_df, fora_results_ubiquitin_lof_df, mm909_ubiquitin_lof_plot_path, "FORA with top Custom Ubiquitin GS across samples (LoF mutations)", "Top Ubiquitin Gene Sets")
+
+print(mm909_ubiquitin_lof_plot)
+```
+
+### Visualization: Global heat map
+
+This does not have the filter p.adjust < 0.05.
+
+```{r, warning=FALSE, message=FALSE, fig.width=10, fig.height=10}
+plot_path <- file.path(figures_ubi_db_path, "mm909_combinedGS_lof_heat_map.pdf")
+combinedGS_lof_plot <- complex_heatmap_genesets(response_df, fora_results_ubiquitin_lof_df, plot_path, 
+                                    "Heat Map of combined Gene Sets per patient", 16, 12)
+
+# Print
+print(combinedGS_lof_plot)
+```
+
+## Repeat FORA focusing on categories only
+
+```{r, warning=FALSE, message=FALSE}
+#10 Perform FORA analysis
+# Define paths
+fora_results_all_csv_path2 <- file.path(results_ubi_db_path, "fora_results_ubiquitin_cat_all.csv")
+fora_results_nonsyn_csv_path2 <- file.path(results_ubi_db_path, "fora_results_ubiquitin_cat_nonsyn.csv")
+fora_results_lof_csv_path2 <- file.path(results_ubi_db_path, "fora_results_ubiquitin_cat_lof.csv")
+
+# Create gene_sets_df with a list of ensembl_id for each go_parent_id
+gene_sets_df <- final_ub_db_df %>%
+  dplyr::group_by(category) %>%
+  dplyr::summarise(ensembl_id = list(ensembl_id), .groups = 'drop')
+
+# Convert the dataframe to a named list
+gene_sets_list <- setNames(gene_sets_df$ensembl_id, gene_sets_df$category)
+
+# Perform FORA analysis for Ubiquitin Gene Sets
+# perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path2, fora_results_nonsyn_csv_path2, fora_results_lof_csv_path2, gene_sets_list=gene_sets_list)
+
+# Load fora results
+fora_results_ubiquitin_all_df2 <- read.csv(fora_results_all_csv_path2, header = TRUE)[ , -1]
+fora_results_ubiquitin_nonsyn_df2 <- read.csv(fora_results_nonsyn_csv_path2, header = TRUE)[ , -1]
+fora_results_ubiquitin_lof_df2 <- read.csv(fora_results_lof_csv_path2, header = TRUE)[ , -1]
+```
+
+<!-- ## Visualization: Top Custom Ubiquitin GS across samples stratified by response (All mutations) -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=6} -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_all_plot_path2 <- file.path(figures_ubi_db_path, -->
+<!--                               "mm909_ubiquitin_cat_all_plot.png") -->
+
+<!-- mm909_ubiquitin_all_plot <- plot_top5(response_df, fora_results_ubiquitin_all_df2, mm909_ubiquitin_all_plot_path2, "FORA with top Custom Ubiquitin GS across samples (All mutations)", "Top Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_all_plot) -->
+<!-- ``` -->
+
+<!-- ### Visualization: Top Custom Ubiquitin GS across samples stratified by response (Nonsyn mutations) -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=6} -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_nonsyn_plot_path2 <- file.path(figures_ubi_db_path, -->
+<!--                               "mm909_ubiquitin_cat_nonsyn_plot.png") -->
+
+<!-- mm909_ubiquitin_nonsyn_plot <- plot_top5(response_df, fora_results_ubiquitin_nonsyn_df2, mm909_ubiquitin_nonsyn_plot_path2, "FORA with top Custom Ubiquitin GS across samples (Nonsyn mutations)", "Top Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_nonsyn_plot) -->
+<!-- ``` -->
+
+### Visualization: Top Custom Ubiquitin GS across samples stratified by response (LoF mutations)
+
+This does not have the filter p.adjust < 0.05.
+
+```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=3}
+# Define output path
+mm909_ubiquitin_lof_plot_path2 <- file.path(figures_ubi_db_path,
+                              "mm909_ubiquitin_cat_lof_plot.png")
+
+mm909_ubiquitin_lof_plot2 <- bubble_plot_all(response_df, fora_results_ubiquitin_lof_df2, mm909_ubiquitin_lof_plot_path2, "FORA with top Custom Ubiquitin GS across samples (LoF mutations)", "Top Ubiquitin Gene Sets")
+
+print(mm909_ubiquitin_lof_plot2)
+```
+
+### Visualization: Global heat map
+
+This does not have the filter p.adjust < 0.05.
+
+```{r, warning=FALSE, message=FALSE, fig.width=10, fig.height=3}
+plot_path <- file.path(figures_ubi_db_path, "mm909_combinedGS_cat_lof_heat_map.pdf")
+combinedGS_lof_plot <- complex_heatmap_genesets(response_df, fora_results_ubiquitin_lof_df2, plot_path,
+                                    "Heat Map of combined Gene Sets per patient", 16, 6)
+
+# Print
+print(combinedGS_lof_plot)
+```
+
+## FORA using mygene to annotate Ensembl Gene IDs to GO parent terms
+
+```{r, message=FALSE, warning=FALSE}
+#9 Annotate Ensembl Gene IDs to each parent go term to do FORA
+# Query the database to find Ensembl IDs for each GO term
+go2ensembl_result <- queryMany(ub_parent_terms,
+                 scopes='go', 
+                 fields=c('ensembl.gene', 'name', 'go'), 
+                 species='human', 
+                 return.as='DataFrame')
+
+# Filter result for ensembl
+go2ensembl_names <- go2ensembl_result$query
+go2ensembl_filtered <- go2ensembl_result$ensembl
+names(go2ensembl_filtered) <- go2ensembl_names # Set names
+
+# Convert to data.frame each element of the list
+go2ensembl_list <- lapply(go2ensembl_filtered, 
+                             function(df) 
+                               if (is.null(df)) data.frame(gene = character()) 
+                               else df %>% 
+                                as.data.frame())
+# Wrangle the data.frame
+go2ensembl_list <- lapply(go2ensembl_list,
+                             function(x) 
+                               x %>% 
+                                dplyr::rename(ensembl_id = gene) %>% 
+                                dplyr::select(ensembl_id))
+# Convert list of df to single data.frame
+raw_go2ensembl_df <- bind_rows(go2ensembl_list, .id = "go_parent_id") %>%
+  dplyr::distinct()
+
+# Adding go_parent_term
+raw_go2ensembl_df <- raw_go2ensembl_df %>%
+  dplyr::mutate(go_parent_term = map_chr(go_parent_id, function(id) {
+    # Access the term for the given GO ID
+    term <- tryCatch({
+      eval(parse(text = paste0("all_go_terms$`", id, "`@Term")))
+    }, error = function(e) NA)
+    return(term)
+  }))
+
+#10 Perform FORA analysis
+# Define paths
+fora_results_all_csv_path_mygene <- file.path(results_ubi_db_path, "fora_results_ubiquitin_all_mygene.csv")
+fora_results_nonsyn_csv_path_mygene <- file.path(results_ubi_db_path, "fora_results_ubiquitin_nonsyn_mygene.csv")
+fora_results_lof_csv_path_mygene <- file.path(results_ubi_db_path, "fora_results_ubiquitin_lof_mygene.csv")
+
+# Adapt structure to gene_sets_list
+gene_sets_df <- raw_go2ensembl_df %>% 
+  dplyr::group_by(go_parent_term) %>%
+  dplyr::summarise(ensembl_ids = list(unique(ensembl_id)), .groups = 'drop')
+
+# Convert the dataframe to a named list
+gene_sets_list <- setNames(gene_sets_df$ensembl_ids, gene_sets_df$go_parent_term)
+
+# Perform FORA analysis for Ubiquitin Gene Sets
+# perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path_mygene, fora_results_nonsyn_csv_path_mygene, fora_results_lof_csv_path_mygene, gene_sets_list=gene_sets_list)
+
+# Load fora results
+fora_results_ubiquitin_all_df_mygene <- read.csv(fora_results_all_csv_path_mygene, header = TRUE)[ , -1]
+fora_results_ubiquitin_nonsyn_df_mygene <- read.csv(fora_results_nonsyn_csv_path_mygene, header = TRUE)[ , -1]
+fora_results_ubiquitin_lof_df_mygene <- read.csv(fora_results_lof_csv_path_mygene, header = TRUE)[ , -1]
+```
+
+<!-- ## Visualization: Top Custom Ubiquitin GS across samples stratified by response (All mutations) -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=6} -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_all_plot_path <- file.path(figures_ubi_db_path, -->
+<!--                               "mm909_ubiquitin_all_plot.png") -->
+
+<!-- mm909_ubiquitin_all_plot <- plot_top5(response_df, fora_results_ubiquitin_all_df, mm909_ubiquitin_all_plot_path, "FORA with top Custom Ubiquitin GS across samples (All mutations)", "Top Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_all_plot) -->
+<!-- ``` -->
+
+<!-- ### Visualization: Top Custom Ubiquitin GS across samples stratified by response (Nonsyn mutations) -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=6} -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_nonsyn_plot_path <- file.path(figures_ubi_db_path, -->
+<!--                               "mm909_ubiquitin_nonsyn_plot.png") -->
+
+<!-- mm909_ubiquitin_nonsyn_plot <- plot_top5(response_df, fora_results_ubiquitin_nonsyn_df, mm909_ubiquitin_nonsyn_plot_path, "FORA with top Custom Ubiquitin GS across samples (Nonsyn mutations)", "Top Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_nonsyn_plot) -->
+<!-- ``` -->
+
+### Visualization: Top Custom Ubiquitin GS across samples stratified by response (LoF mutations)
+
+This does not have the filter p.adjust < 0.05.
+
+```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=6}
+# Define output path
+mm909_ubiquitin_lof_plot_path_mygene <- file.path(figures_ubi_db_path,
+                              "mm909_ubiquitin_lof_plot_mygene.png")
+
+mm909_ubiquitin_lof_plot_mygene <- bubble_plot_all(response_df, fora_results_ubiquitin_lof_df_mygene, mm909_ubiquitin_lof_plot_path_mygene, "FORA with top Custom Ubiquitin GS across samples (LoF mutations)", "Top Ubiquitin Gene Sets")
+
+print(mm909_ubiquitin_lof_plot_mygene)
+```
+
+<!-- ## Visualization: Box plot per 6 Gene Sets -->
+
+<!-- This does not have the filter p.adjust < 0.05. -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=8} -->
+<!-- # Calculate the sequence of indices in steps of 10 -->
+<!-- indices <- seq(from = 1, to = length(gene_sets_list), by = 6) -->
+
+<!-- # Loop through the indices -->
+<!-- global_idx <- 1 -->
+<!-- for (i in indices) { -->
+<!--   # Select a group of 10 gene sets or the remaining ones if less than 10 -->
+<!--   geneset_group <- names(gene_sets_list)[i:min(i+9, length(gene_sets_list))] -->
+
+<!--   # Define the output plot path dynamically based on the current index -->
+<!--   plot_path <- file.path(figures_ubi_db_path, paste0(global_idx, "_combinedGS_lof_boxplot.png")) -->
+
+<!--   # Call the plotting function with the current geneset group -->
+<!--   combinedGS_lof_plot <- boxplot_genesets(geneset_group, response_df, fora_results_ubiquitin_lof_df, plot_path,  -->
+<!--                                       paste("FORA with GS", i, "to", min(i+9, length(gene_sets_list)),  -->
+<!--                                             "stratified by response (LoF mutations)"), 3) -->
+
+<!--   # Print -->
+<!--   print(combinedGS_lof_plot) -->
+
+<!--   # Update global index -->
+<!--   global_idx = global_idx + 1 -->
+<!-- } -->
+<!-- ``` -->
+
+### Visualization: Global heat map
+
+This does not have the filter p.adjust < 0.05.
+
+```{r, warning=FALSE, message=FALSE, fig.width=10, fig.height=10}
+plot_path_mygene <- file.path(figures_ubi_db_path, "mm909_combinedGS_lof_heat_map_mygene.pdf")
+combinedGS_lof_plot_mygene <- complex_heatmap_genesets(response_df, fora_results_ubiquitin_lof_df_mygene, plot_path_mygene, 
+                                    "Heat Map of combined Gene Sets per patient", 16, 12)
+
+# Print
+print(combinedGS_lof_plot_mygene)
+```
+
+<!-- ## Repeat FORA focusing on categories only -->
+
+<!-- ```{r, warning=FALSE, message=FALSE} -->
+<!-- # map_category2parent_df <- final_ub_db_df %>% -->
+<!-- #   dplyr::select(ensembl_id, category, go_parent_id) -->
+<!-- # -->
+<!-- # # Adding go_parent_term -->
+<!-- # parent2category_df <- raw_go2ensembl_df %>% -->
+<!-- #   dplyr::left_join(map_category2parent_df, by=c("ensembl_id", "go_parent_id")) -->
+
+<!-- # Adding category -->
+<!-- # Initialize an empty list to hold the mapping -->
+<!-- go_mapping4 <- list() -->
+
+<!-- # Iterate through each category in ub_db -->
+<!-- for (category in names(ub_db)) { -->
+<!--   # Iterate through each parent within a category -->
+<!--   for (parent_id in names(ub_db[[category]])) { -->
+<!--     # Iterate through each child within a parent -->
+<!--     children_ids <- ub_db[[category]][[parent_id]] -->
+<!--     for (child_id in children_ids) { -->
+<!--       # Append the category and parent information to the mapping list for each child -->
+<!--       if (!is.null(go_mapping4[[child_id]])) { -->
+<!--         go_mapping4[[child_id]] <- unique(c(go_mapping4[[child_id]], paste(parent_id, category, sep = "|"))) -->
+<!--       } else { -->
+<!--         go_mapping4[[child_id]] <- paste(parent_id, category, sep = "|") -->
+<!--       } -->
+<!--     } -->
+<!--   } -->
+<!-- } -->
+
+<!-- # Convert the mapping list to a data.frame for easier manipulation -->
+<!-- go_mapping_df4 <- stack(go_mapping4) -->
+<!-- names(go_mapping_df4) <- c("info", "go_id") -->
+
+<!-- # Split info into go_parent_id and category -->
+<!-- go_mapping_df4 <- go_mapping_df4 %>% -->
+<!--   tidyr::separate(info, into = c("go_parent_id", "category"), sep = "\\|") %>% -->
+<!--   dplyr::select(go_parent_id, category) %>% -->
+<!--   dplyr::distinct() -->
+
+<!-- # Join the mapping information back to the original data.frame -->
+<!-- parent2category_df <- raw_go2ensembl_df %>% -->
+<!--   left_join(go_mapping_df4, by = "go_parent_id") -->
+
+<!-- # Fill NAs with ubiquitin_other -->
+<!-- parent2category_df <- parent2category_df %>%  -->
+<!--   dplyr::mutate(category = if_else(is.na(category), "ubiquitin_other", category)) -->
+
+<!-- #10 Perform FORA analysis -->
+<!-- # Define paths -->
+<!-- fora_results_all_csv_path2 <- file.path(results_ubi_db_path, "fora_results_ubiquitin_cat_all.csv") -->
+<!-- fora_results_nonsyn_csv_path2 <- file.path(results_ubi_db_path, "fora_results_ubiquitin_cat_nonsyn.csv") -->
+<!-- fora_results_lof_csv_path2 <- file.path(results_ubi_db_path, "fora_results_ubiquitin_cat_lof.csv") -->
+
+<!-- # Adapt structure to gene_sets_list -->
+<!-- gene_sets_df2 <- parent2category_df %>% -->
+<!--   dplyr::group_by(category) %>% -->
+<!--   dplyr::summarise(ensembl_ids = list(unique(ensembl_id)), .groups = 'drop') -->
+
+<!-- # Convert the dataframe to a named list -->
+<!-- gene_sets_list2 <- setNames(gene_sets_df2$ensembl_ids, gene_sets_df2$category) -->
+
+<!-- # Perform FORA analysis for Ubiquitin Gene Sets -->
+<!-- # perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path2, fora_results_nonsyn_csv_path2, fora_results_lof_csv_path2, gene_sets_list=gene_sets_list2) -->
+
+<!-- # Load fora results -->
+<!-- fora_results_ubiquitin_all_df2 <- read.csv(fora_results_all_csv_path2, header = TRUE)[ , -1] -->
+<!-- fora_results_ubiquitin_nonsyn_df2 <- read.csv(fora_results_nonsyn_csv_path2, header = TRUE)[ , -1] -->
+<!-- fora_results_ubiquitin_lof_df2 <- read.csv(fora_results_lof_csv_path2, header = TRUE)[ , -1] -->
+<!-- ``` -->
+
+<!-- ## Visualization: Top Custom Ubiquitin GS across samples stratified by response (All mutations) -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=6} -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_all_plot_path2 <- file.path(figures_ubi_db_path, -->
+<!--                               "mm909_ubiquitin_cat_all_plot.png") -->
+
+<!-- mm909_ubiquitin_all_plot <- plot_top5(response_df, fora_results_ubiquitin_all_df2, mm909_ubiquitin_all_plot_path2, "FORA with top Custom Ubiquitin GS across samples (All mutations)", "Top Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_all_plot) -->
+<!-- ``` -->
+
+<!-- ### Visualization: Top Custom Ubiquitin GS across samples stratified by response (Nonsyn mutations) -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=6} -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_nonsyn_plot_path2 <- file.path(figures_ubi_db_path, -->
+<!--                               "mm909_ubiquitin_cat_nonsyn_plot.png") -->
+
+<!-- mm909_ubiquitin_nonsyn_plot <- plot_top5(response_df, fora_results_ubiquitin_nonsyn_df2, mm909_ubiquitin_nonsyn_plot_path2, "FORA with top Custom Ubiquitin GS across samples (Nonsyn mutations)", "Top Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_nonsyn_plot) -->
+<!-- ``` -->
+
+<!-- ### Visualization: Top Custom Ubiquitin GS across samples stratified by response (LoF mutations) -->
+
+<!-- This does not have the filter p.adjust < 0.05. -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=6} -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_lof_plot_path2 <- file.path(figures_ubi_db_path, -->
+<!--                               "mm909_ubiquitin_cat_lof_plot.png") -->
+
+<!-- mm909_ubiquitin_lof_plot <- bubble_plot_all(response_df, fora_results_ubiquitin_lof_df2, mm909_ubiquitin_lof_plot_path2, "FORA with top Custom Ubiquitin GS across samples (LoF mutations)", "Top Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_lof_plot) -->
+<!-- ``` -->
+
+<!-- ### Visualization: Global heat map -->
+
+<!-- This does not have the filter p.adjust < 0.05. -->
+
+<!-- ```{r, warning=FALSE, message=FALSE, fig.width=10, fig.height=3} -->
+<!-- plot_path <- file.path(figures_ubi_db_path, "mm909_combinedGS_cat_lof_heat_map.png") -->
+<!-- combinedGS_lof_plot <- heat_map_genesets(response_df, fora_results_ubiquitin_lof_df2, plot_path, -->
+<!--                                     "Heat Map of combined Gene Sets per patient") -->
+
+<!-- # Print -->
+<!-- print(combinedGS_lof_plot) -->
+<!-- ``` -->
+
+<!-- ### Visualization: Bubble plot per Gene Set -->
+
+<!-- This does not have the filter p.adjust < 0.05. -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=5} -->
+<!-- # Loop through each geneset -->
+<!-- for(geneset in names(gene_sets_list)) { -->
+<!--   # Define the output plot path dynamically based on the current geneset -->
+<!--   plot_path <- file.path(figures_ubi_db_path, paste0(geneset, "_combinedGS_lof_bubbleplot.png")) -->
+
+<!--   # Generate the plot title dynamically -->
+<!--   plot_title <- paste("FORA with", geneset, "GS per sample stratified by response (LoF mutations)") -->
+<!--   y_label <- NULL -->
+
+<!--   # Use tryCatch when calling the plotting function -->
+<!--   tryCatch({ -->
+<!--     # Attempt to generate and print the plot -->
+<!--     combinedGS_lof_plot <- plot_geneset(geneset, response_df, fora_results_ubiquitin_lof_df, plot_path, plot_title, y_label) -->
+<!--     print(combinedGS_lof_plot) -->
+<!--   }, error = function(e) { -->
+<!--     # If an error occurs, print the error message -->
+<!--     cat("An error occurred with geneset", geneset, ": ", e$message, "\n") -->
+<!--   }) -->
+<!-- } -->
+<!-- ``` -->
+
+Some notes:
+
+- The plots belong to annotating Ensembl Gene IDs to go_parent_ids with the mygene package, it has nothing to do with ub_db. This is why I get so different results compared to before, I get much less genes annotated.
+
+# Create a binary matrix (LoF - Ubiquitin)
+
+This binary matrix has ubiquitin mutated genes as rows and patients as columns. There is a 1 if a particular gene was mutated at least once for a specific sample, and zero otherwise.
+
+```{r, message=FALSE, warning=FALSE}
+# Create a dataframe for the matrix, initialize with ensembl_id and hugo_symbol, fill 0 for samples
+lof_ub_binary <- data.frame(ensembl_id = ub_ensembl_ids, hugo_symbol = rep(NA, length(ub_ensembl_ids)))
+
+# For each sample_id, add a column to lof_ub_binary and initialize with 0
+for (sample_id in unique(lof_df_ubiquitin$sample_id)) {
+  lof_ub_binary[[sample_id]] <- 0
+}
+
+# Map hugo_symbols to the corresponding ensembl_id
+hugo_map <- lof_df_ubiquitin[!duplicated(lof_df_ubiquitin$ensembl_id), c("ensembl_id", "hugo_symbol")]
+lof_ub_binary$hugo_symbol <- hugo_map$hugo_symbol[match(lof_ub_binary$ensembl_id, hugo_map$ensembl_id)]
+
+# Fill the matrix with 1s where appropriate
+for (i in 1:nrow(lof_df_ubiquitin)) {
+  row <- lof_df_ubiquitin[i, ]
+  if (row$ensembl_id %in% lof_ub_binary$ensembl_id) {
+    lof_ub_binary[row$ensembl_id == lof_ub_binary$ensembl_id, row$sample_id] <- 1
+  }
+}
+
+# Annotate missing Hugo Symbols with Ensembl Gene IDs
+missing_hsymbols <- is.na(lof_ub_binary$hugo_symbol)
+new_hsymbols <- ENSEMBLtoSYMBOL(lof_ub_binary$ensembl_id[missing_hsymbols])
+lof_ub_binary$hugo_symbol[missing_hsymbols] <- new_hsymbols
+
+# Save the lof_binary into an RDS file
+lof_ub_binary_out_path <- file.path(results_ubi_db_path, 
+                      "lof_ub_binary.rds")
+saveRDS(lof_ub_binary, file = lof_ub_binary_out_path)
+
+# Display
+datatable(lof_ub_binary, 
+          extensions = c('Buttons', 
+                         'FixedColumns'), 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            fixedColumns = list(leftColumns = 3), # Freeze the first 3 columns
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Binary matrix of ubiquitin LoF mutations per sample."
+        )
+```
+
+```{r}
+ub_db <- readRDS(file.path(results_ubi_db_path, "ub_db.rds"))
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

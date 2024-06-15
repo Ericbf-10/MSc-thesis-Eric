@@ -22,26 +22,10 @@ output:
 This document is to get the protein sequences of the ubiquitin-related genes that have a LoF mutation from all the samples and create a multifasta file.
 
 ```{r, message=FALSE}
-### Load required libraries
-library(readxl)
-library(tidyverse)
-library(purrr)
-library(dplyr)
-library(knitr)
-library(DT)
-library(httr)
-library(jsonlite)
-library(stringr)
-library(biomaRt)
-library(GSEABase)
-library(HGNChelper)
-library(mygene)
-library(GO.db)
-library(AnnotationDbi)
-library(VennDiagram)
-
-### Load functions
+### Load packages, functions and paths
+source(file = "../01_install.R")
 source(file = "../02_functions.R")
+source(file = "../03_paths.R")
 
 ### Define paths
 current_dir <- getwd()
@@ -51,7 +35,7 @@ results_pc_path <- file.path(current_dir,
                               "../../results/patient_characteristics/output")
 results_fip_path <- file.path(current_dir,
                               "../../results/somatic_mutation_analysis/functional_impact_prediction/output")
-results_ubgenesets_path <- file.path(current_dir, 
+results_ubi_db_path <- file.path(current_dir, 
                                  "../../results/somatic_mutation_analysis/ubiquitin_custom_GS/output")
 results_ubfora_path <- file.path(current_dir, 
                                  "../../results/somatic_mutation_analysis/ubiquitin_fora/output")
@@ -64,8 +48,8 @@ if(!file.exists(results_protein_seqs_path)) {
 }
 
 ### Read data & wrangle
-patients_ub_lof_mut_path <- file.path(results_ubfora_path, "lof_patients_ub_mutations.csv") # LoF patients mutations df
-patients_ub_lof_mut_df <- read.csv(patients_ub_lof_mut_path, header = TRUE)[ , -1]
+patients_ub_lof_mut_path <- file.path(results_ubfora_path, "annot_lof_ub.rds") # LoF patients mutations df
+patients_ub_lof_mut_df <- readRDS(patients_ub_lof_mut_path)
 
 # Extract ensembl_ids to do the left_join
 g_ensembl_df <- patients_ub_lof_mut_df %>% 
@@ -88,9 +72,11 @@ patients_ub_prot_lof_mut_path <- file.path(results_protein_seqs_path,
 write.csv(patients_ub_prot_lof_mut_df, file = patients_ub_prot_lof_mut_path, row.names = TRUE)
 
 # Extract unique protein ensembl ids
-p_ensembl_ids <- unique(patients_ub_prot_lof_mut_df$p_ensembl_id) # Gives 349 protein_ids for 106 genes
-swiss_prot_ids <- unique(patients_ub_prot_lof_mut_df$SWISSPROT) # Missing a few (101 swissprot_ids vs 106 genes)
+p_ensembl_ids <- unique(patients_ub_prot_lof_mut_df$p_ensembl_id) # Gives 336 protein_ids for 106 genes
+swiss_prot_ids <- unique(patients_ub_prot_lof_mut_df$SWISSPROT) # Missing a few (98 swissprot_ids vs 106 genes)
 ```
+
+Some genes are related to different proteins, probably due to alternative splicing. That is why from 106 genes we get 336 proteins.
 
 # Getting Protein sequences using biomaRt (grch37 assembly)
 

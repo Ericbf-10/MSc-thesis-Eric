@@ -1,0 +1,1237 @@
+---
+title: "Impact of dysfunctional ubiquitination in response to cancer immunotherapy"
+subtitle: <center> Somatic mutations analysis - Ubiquitin Gene Overrepresentation Analysis </center>
+author: "Eric Bautista Farrerons (s212514)"
+date: '`r paste("First created on April 2024. Updated on ", format(Sys.Date(), "%d %B %Y"))`'
+output:
+  html_document:
+    css: style.css
+    code_folding: hide
+    fig_caption: yes
+    toc: yes
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    toc_depth: 4
+    number_sections: true
+---
+
+# Data pre-processing
+### Load data
+
+```{r, message=FALSE}
+### Load packages, functions and paths
+source(file = "../01_install.R")
+source(file = "../02_functions.R")
+source(file = "../03_paths.R")
+
+### Define paths
+current_dir <- getwd()
+data_path <- file.path(current_dir,
+                       "../../data/_raw")
+results_pc_path <- file.path(current_dir,
+                              "../../results/patient_characteristics/output")
+results_fip_path <- file.path(current_dir,
+                              "../../results/somatic_mutation_analysis/functional_impact_prediction/output")
+results_ubi_db_path <- file.path(current_dir, 
+                                 "../../results/somatic_mutation_analysis/ubiquitin_custom_GS/output")
+results_ubfora_path <- file.path(current_dir, 
+                                 "../../results/somatic_mutation_analysis/ubiquitin_ora_class_go/output")
+
+# Create the folder if it does not exist
+if(!file.exists(results_ubfora_path)) {
+  dir.create(results_ubfora_path, recursive = TRUE)
+}
+
+figures_ubfora_path <- file.path(current_dir, 
+                                 "../../results/somatic_mutation_analysis/ubiquitin_ora_class_go/figures")
+
+# Create the folder if it does not exist
+if(!file.exists(figures_ubfora_path)) {
+  dir.create(figures_ubfora_path, recursive = TRUE)
+}
+
+maf_df_path <- file.path(results_fip_path, "all_mutations.csv") # All mutations df
+nonsyn_df_path <- file.path(results_fip_path, "nonsyn_mutations.csv") # Nonsyn mutations df
+lof_df_path <- file.path(results_fip_path, "lof_mutations_reduced.csv") # LoF mutations df
+
+# Sup1 data
+sup1_response_path <- file.path(results_pc_path, 
+                           "sup1_response.csv")
+### Read data & wrangle
+
+# Read 3 lists of mutations
+
+# All
+maf_df_annotated <- read.csv(maf_df_path, header = TRUE)[ , -1]
+maf_df_annotated <- maf_df_annotated %>% 
+  dplyr::filter(!(sample_id %in% c("MM909_01", "MM909_20", "MM909_24", "MM909_29", "MM909_45")))
+list_of_all_mutations <- split(maf_df_annotated, maf_df_annotated$sample_id
+                               )
+# Nonsyn
+nonsyn_df_annotated <- read.csv(nonsyn_df_path, header = TRUE)[ , -1]
+nonsyn_df_annotated <- nonsyn_df_annotated %>% 
+  dplyr::filter(!(sample_id %in% c("MM909_01", "MM909_20", "MM909_24", "MM909_29", "MM909_45")))
+list_of_nonsyn_mutations <- split(nonsyn_df_annotated, nonsyn_df_annotated$sample_id)
+
+# LoF
+lof_df_annotated <- read.csv(lof_df_path, header = TRUE)[ , -1]
+lof_df_annotated <- lof_df_annotated %>% 
+  dplyr::filter(!(sample_id %in% c("MM909_01", "MM909_20", "MM909_24", "MM909_29", "MM909_45")))
+list_of_lof_mutations <- split(lof_df_annotated, lof_df_annotated$sample_id)
+
+# Get the list of patient IDs
+sample_id_list <- unique(maf_df_annotated$sample_id)
+
+## Read sup1_response.csv
+sup1_response_df <- read.csv(sup1_response_path)[ , -1] # Drop first column
+
+# df to merge response info later
+response_df <- sup1_response_df %>% 
+  dplyr::rename(sample_id = Sample.ID,
+                patient_response = Patient.Response) %>% 
+  dplyr::select(sample_id, patient_response) %>% 
+  dplyr::filter(!(sample_id %in% c("MM909_01", "MM909_20", "MM909_24", "MM909_29", "MM909_45")))
+
+# Create a list of Responders and Non-responders
+sample_id_lists <- split(sup1_response_df$Sample.ID, 
+                         sup1_response_df$Patient.Response) # Split the "Sample.ID" values into lists based on "Patient.Response"
+
+r_sample_ids <- sample_id_lists$R
+nr_sample_ids <- sample_id_lists$NR
+```
+
+### Correcting Hugo Symbols in input data
+
+```{r, message=FALSE, warning=FALSE}
+# Load the GMT file
+gene_sets_collection <- getGmt(file.path(data_path, "ubgenes.gmt"))
+
+# Initialize an empty data frame for gene IDs
+corrected_hsymbols <- data.frame(
+  category = character(),
+  description = character(),
+  hugo_symbol = character(),
+  corrected_hugo_symbol = character(),
+  ensembl_id = character(),
+  stringsAsFactors = FALSE
+  )
+
+# Extract gene sets and their descriptions
+for (gene_set_id in names(gene_sets_collection)) {
+  gene_set <- gene_sets_collection[[gene_set_id]]
+  gene_ids <- geneIds(gene_set)
+  description <- gene_set@shortDescription
+  
+  # Replace "/" with "-" in gene IDs
+  gene_ids <- gsub("/", "-", gene_ids)
+  
+  # Reverse date-like hugo symbols
+  gene_ids <- correct_date_like_symbols(gene_ids)
+  
+  # Create a temporary data frame for this gene set
+  temp_df <- checkGeneSymbols(gene_ids)
+  
+  # Add missing columns to temp_df
+  temp_df <- temp_df %>% 
+    dplyr::mutate(category = rep(gene_set_id, length(gene_ids)),
+                  description = rep(description, length(gene_ids)))
+  
+  # Combine with the main data frame
+  corrected_hsymbols <- rbind(corrected_hsymbols, temp_df)
+}
+
+# Split the gene_id where "///" is found and keep only the second part (if exists)
+corrected_hsymbols$Suggested.Symbol <- sapply(str_split(corrected_hsymbols$Suggested.Symbol, " /// "), function(x) {
+  if (length(x) > 1) {
+    # If there's more than one part, keep the second one
+    return(trimws(x[2]))
+  } else {
+    # If there's only one part, keep it as is
+    return(trimws(x[1]))
+  }
+})
+
+corrected_hsymbols <- corrected_hsymbols %>% 
+  dplyr::rename(c(hugo_symbol = x, 
+                  corrected_hugo_symbol = Suggested.Symbol)) %>% 
+  dplyr::select(category, description, hugo_symbol, corrected_hugo_symbol)
+```
+
+### Filtering lists to only include Ubiquitin-related genes
+
+```{r, message=FALSE, warning=FALSE}
+# Map HUGO symbols to Ensembl Gene IDs
+corrected_hsymbols$ensembl_id <- SYMBOLtoENSEMBL(corrected_hsymbols$corrected_hugo_symbol)
+
+# Check missing Ensembl IDs
+missing_ensembl <- corrected_hsymbols %>% 
+  dplyr::filter(!str_detect(ensembl_id, "^ENSG"))
+
+# Find them manually and update df (for now only Ensembl Gene IDs)
+missing_ensembl <- missing_ensembl %>%
+  dplyr::mutate(
+    # corrected_hugo_symbol = case_when(
+  #   hugo_symbol == "UBE2L5" ~ "UBE2L5P",
+  #   hugo_symbol == "BABAM2" ~ "BRE",
+  #   hugo_symbol == "COP1" ~ "RFWD2",
+  #   hugo_symbol == "DCAF1" ~ "VPRBP",
+  #   hugo_symbol == "DMAC2" ~ "ATP5SL",
+  #   hugo_symbol == "ELOB" ~ "TCEB2",
+  #   hugo_symbol == "FBH1" ~ "FBXO18",
+  #   hugo_symbol == "FBXL21P" ~ "FBXL21",
+  #   hugo_symbol == "MARCHF6" ~ "MARCH6",
+  #   hugo_symbol == "1-Mar" ~ "MARCH1",
+  #   hugo_symbol == "10-Mar" ~ "MARCH10",
+  #   hugo_symbol == "11-Mar" ~ "MARCH11",
+  #   hugo_symbol == "2-Mar" ~ "MARCH2",
+  #   hugo_symbol == "3-Mar" ~ "MARCH3",
+  #   hugo_symbol == "4-Mar" ~ "MARCH4",
+  #   hugo_symbol == "5-Mar" ~ "MARCH5",
+  #   hugo_symbol == "6-Mar" ~ "MARCH6",
+  #   hugo_symbol == "7-Mar" ~ "MARCH7",
+  #   hugo_symbol == "8-Mar" ~ "MARCH8",
+  #   hugo_symbol == "9-Mar" ~ "MARCH9",
+  #   hugo_symbol == "PARK2" ~ "PARK2",
+  #   hugo_symbol == "RFWD2" ~ "RFWD2",
+  #   hugo_symbol == "RNF212B" ~ "C14orf164",
+  #   hugo_symbol == "RNF219" ~ "RNF219",
+  #   hugo_symbol == "RNF225" ~ "RNF225",
+  #   hugo_symbol == "TRIM75P" ~ "TRIM75P",
+  #   hugo_symbol == "ZNF645" ~ "ZNF645",
+  #   hugo_symbol == "USP17L1" ~ "USP17L1P",
+  #   hugo_symbol == "OTULIN" ~ "FAM105B",
+  #   TRUE ~ corrected_hugo_symbol
+  # ),
+  ensembl_id = case_when(
+    hugo_symbol == "UBE2L5" ~ "ENSG00000236444",
+    hugo_symbol == "BABAM2" ~ "ENSG00000158019",
+    hugo_symbol == "COP1" ~ "ENSG00000143207",
+    hugo_symbol == "DCAF1" ~ "ENSG00000145041",
+    hugo_symbol == "DMAC2" ~ "ENSG00000105341",
+    hugo_symbol == "ELOB" ~ "ENSG00000103363",
+    hugo_symbol == "FBH1" ~ "ENSG00000134452",
+    hugo_symbol == "FBXL21P" ~ "ENSG00000164616",
+    hugo_symbol == "MARCHF6" ~ "ENSG00000145495",
+    hugo_symbol == "1-Mar" ~ "ENSG00000145416",
+    hugo_symbol == "10-Mar" ~ "ENSG00000173838",
+    hugo_symbol == "11-Mar" ~ "ENSG00000183654",
+    hugo_symbol == "2-Mar" ~ "ENSG00000099785",
+    hugo_symbol == "3-Mar" ~ "ENSG00000173926",
+    hugo_symbol == "4-Mar" ~ "ENSG00000144583",
+    hugo_symbol == "5-Mar" ~ "ENSG00000198060",
+    hugo_symbol == "6-Mar" ~ "ENSG00000145495",
+    hugo_symbol == "7-Mar" ~ "ENSG00000136536",
+    hugo_symbol == "8-Mar" ~ "ENSG00000165406",
+    hugo_symbol == "9-Mar" ~ "ENSG00000139266",
+    hugo_symbol == "PARK2" ~ "ENSG00000185345",
+    hugo_symbol == "RFWD2" ~ "ENSG00000143207",
+    hugo_symbol == "RNF212B" ~ "ENSG00000215277",
+    hugo_symbol == "RNF219" ~ "ENSG00000152193",
+    hugo_symbol == "RNF225" ~ "ENSG00000269855",
+    hugo_symbol == "TRIM75P" ~ "ENSG00000250374",
+    hugo_symbol == "ZNF645" ~ "ENSG00000175809",
+    hugo_symbol == "USP17L1" ~ "ENSG00000230549",
+    hugo_symbol == "OTULIN" ~ "ENSG00000154124",
+    TRUE ~ ensembl_id
+  ))
+
+# Merge the dataframes
+corrected_hsymbols_updated <- corrected_hsymbols %>%
+  left_join(dplyr::select(missing_ensembl, 
+                          hugo_symbol, 
+                          # new_corrected_hugo_symbol = corrected_hugo_symbol, 
+                          new_ensembl_id = ensembl_id),
+            by = "hugo_symbol")
+
+# Update the values based on the join
+corrected_hsymbols_updated <- corrected_hsymbols_updated %>%
+  dplyr::mutate(
+    # corrected_hugo_symbol = ifelse(!is.na(new_corrected_hugo_symbol), new_corrected_hugo_symbol, corrected_hugo_symbol),
+    ensembl_id = ifelse(!is.na(new_ensembl_id), new_ensembl_id, ensembl_id)
+    ) %>%
+  dplyr::select(
+    # -new_corrected_hugo_symbol, 
+    -new_ensembl_id, -hugo_symbol)
+
+# Extract the ensembl_id column to do the filtering
+ubiquitin_df <- corrected_hsymbols_updated %>% 
+  dplyr::select(ensembl_id)
+
+# Get ubiquitin unique ensembl ids
+ub_ensembl_ids <- unique(corrected_hsymbols_updated$ensembl_id)
+
+# Filter for ubiquitin genes in all the mutation lists
+list_of_all_ub_mutations <- ubiquitin_filter(list_of_all_mutations, ubiquitin_df)
+list_of_nonsyn_ub_mutations <- ubiquitin_filter(list_of_nonsyn_mutations, ubiquitin_df)
+list_of_lof_ub_mutations <- ubiquitin_filter(list_of_lof_mutations, ubiquitin_df)
+
+# Bind rows to re-generate the dataframes
+all_df_ubiquitin <- bind_rows(list_of_all_ub_mutations)
+nonsyn_df_ubiquitin <- bind_rows(list_of_nonsyn_ub_mutations)
+lof_df_ubiquitin <- bind_rows(list_of_lof_ub_mutations)
+
+# Eliminate duplicates?
+
+# Get all unique sample_id values
+unique_sample_ids <- unique(list_of_lof_ub_mutations$sample_id)
+```
+
+# Summary of mutations per patient
+
+```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=12}
+# AppendixBc/d
+
+# Define output path
+mm909_sum_plot_path <- file.path(figures_ubfora_path,
+                              "mm909_sum_plot_ubi_r.png")
+
+# Summary plot
+mm909_sum_plot <- sum_plot(response_df, all_df_ubiquitin, nonsyn_df_ubiquitin, lof_df_ubiquitin, mm909_sum_plot_path, select_r = TRUE)
+
+# Display
+print(mm909_sum_plot)
+```
+
+Sample MM909_47 does not have any Ubiquitin-related gene. There are 158 ubiquitin LoF mutations in total.
+
+# Define Gene Sets based on input file
+
+```{r, warning=FALSE, message=FALSE}
+# Count how many genes each category has initially
+raw_category_gene_count <- corrected_hsymbols_updated %>% 
+  dplyr::group_by(category, description) %>%
+  dplyr::summarise(row_count = n()) %>%
+  dplyr::arrange(desc(row_count)) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::rename(gene_count = row_count)
+
+# Add total count row
+total_count <- sum(raw_category_gene_count$gene_count)
+summary_row <- tibble(category = "Total", description = "All Categories", gene_count = total_count)
+raw_category_gene_count <- bind_rows(raw_category_gene_count, summary_row)
+
+# Display table
+datatable(raw_category_gene_count, 
+          extensions = c('Buttons', 
+                         'FixedColumns'), 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            fixedColumns = list(leftColumns = 1), # Freeze the first column
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Count of genes included in each ubiquitin category (directly from the file)."
+        )
+```
+
+There are 729 ubiquitin-related genes in the file. The category E3_genes (Ubiquitin-protein ligase family) is largely overrepresented compared to the others. And the category E1_genes	(Ubiquitin-activating enzymes) is underrepresented.
+
+A brief description of the ubiquitin protein families described here:
+The ubiquitinylation process is now known to be performed by several enzymes in sequence, starting with EC 6.2.1.45 (ubiquitin-activating enzyme E1) and followed by several transfer reactions, including those of EC 2.3.2.23 (E2 ubiquitin-conjugating enzyme) and EC 2.3.2.27 (RING-type E3 ubiquitin transferase) [Ref](https://www.brenda-enzymes.org/enzyme.php?ecno=6.3.2.19).
+
+Ubiquitin carboxyl-terminal hydrolases (UCH) or Deubiquitinases (DUBs) (EC 3.4.19.12) are thiol proteases that recognise and hydrolyse the peptide bond at the C-terminal glycine of ubiquitin. These enzymes are involved in the processing of poly-ubiquitin precursors as well as that of ubiquinated proteins. The deubiquitinsing proteases can be split into 2 size ranges, 20-30kDa (IPR001578) and 100-200kDa: the second class consist of large proteins (800 to 2000 residues) that belong to the peptidase family C19, and this group is currently represented by yeast UBP1 [Ref](https://www.ebi.ac.uk/interpro/entry/InterPro/IPR001394/).
+
+**In summary, E1, E2 and E3 are enzymes involved in "protein ubiquitination", whereas C19 and dub are enzymes involved in "protein deubiquitination".**
+
+# Divide LoF mutations for responders and non-responders
+
+```{r, warning=FALSE, message=FALSE}
+# Add category and description to genes
+cat_lof_df_ubiquitin <- lof_df_ubiquitin %>% 
+  dplyr::left_join(corrected_hsymbols_updated, by="ensembl_id")
+
+# Add response
+annot_lof_df_ubiquitin <- cat_lof_df_ubiquitin %>% 
+  dplyr::left_join(response_df, by="sample_id") %>% 
+  dplyr::distinct()
+
+# Save to RDS
+annot_lof_ub_path <- file.path(results_ubfora_path, 
+                      "annot_lof_ub.rds")
+saveRDS(annot_lof_df_ubiquitin, file = annot_lof_ub_path)
+
+# Responders
+r_lof_ub_df <- annot_lof_df_ubiquitin %>% 
+  dplyr::filter(sample_id %in% r_sample_ids)
+
+# Non-responders
+nr_lof_ub_df <- annot_lof_df_ubiquitin %>% 
+  dplyr::filter(sample_id %in% nr_sample_ids)
+```
+
+There are `r nrow(r_lof_ub_df)` LoF mutations for ubiquitin-related genes in responders in total.
+
+There are `r nrow(nr_lof_ub_df)` LoF mutations for ubiquitin-related genes in non-responders in total.
+
+So, we can see that there are ~3 times more mutations in ubiquitin-related genes in Responders compared to Non-responders. This is in favor of our hypothesis, but still need further proof.
+
+```{r, warning=FALSE, message=FALSE}
+# Display tables
+datatable(r_lof_ub_df, 
+          extensions = c('Buttons', 
+                         'FixedColumns'), 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            fixedColumns = list(leftColumns = 2), # Freeze the first 2 columns
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "LoF mutations for ub-related genes in Responders."
+        )
+
+datatable(nr_lof_ub_df, 
+          extensions = c('Buttons', 
+                         'FixedColumns'), 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            fixedColumns = list(leftColumns = 2), # Freeze the first 2 columns
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "LoF mutations for ub-related genes in Non-responders."
+        )
+```
+
+# Tables of Gene Sets
+## Global
+
+```{r, warning=FALSE, message=FALSE}
+# Count how many genes each category has (R & NR)
+glob_category_gene_count <- annot_lof_df_ubiquitin %>% 
+  dplyr::group_by(category, description) %>%
+  dplyr::summarise(row_count = n()) %>%
+  dplyr::arrange(desc(row_count)) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::rename(mutation_count = row_count)
+
+# Get unique ensembl ids
+glob_unique_ensembl_ids <- annot_lof_df_ubiquitin %>% 
+  dplyr::select(ensembl_id) %>% 
+  dplyr::distinct() %>% 
+  dplyr::pull(ensembl_id)
+
+# Add total count row
+total_count <- sum(glob_category_gene_count$mutation_count)
+summary_row <- tibble(category = "Total", description = "All Categories", mutation_count = total_count)
+glob_category_gene_count <- bind_rows(glob_category_gene_count, summary_row)
+
+# Display table
+datatable(glob_category_gene_count, 
+          extensions = c('Buttons', 
+                         'FixedColumns'), 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            fixedColumns = list(leftColumns = 1), # Freeze the first column
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Count of mutations in genes included in each ubiquitin category for Responders and Non-responders."
+        )
+```
+
+So, we have `r total_count` mutations in `r length(glob_unique_ensembl_ids)` genes.
+
+## Responders
+
+```{r, warning=FALSE, message=FALSE}
+# Count how many genes each category has (R)
+r_category_gene_count <- r_lof_ub_df %>% 
+  dplyr::group_by(category, description) %>%
+  dplyr::summarise(row_count = n()) %>%
+  dplyr::arrange(desc(row_count)) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::rename(mutation_count = row_count)
+
+# Get unique ensembl ids
+r_unique_ensembl_ids <- r_lof_ub_df %>% 
+  dplyr::select(ensembl_id) %>% 
+  dplyr::distinct() %>% 
+  dplyr::pull(ensembl_id)
+
+# Add total count row
+total_count <- sum(r_category_gene_count$mutation_count)
+summary_row <- tibble(category = "Total", description = "All Categories", mutation_count = total_count)
+r_category_gene_count <- bind_rows(r_category_gene_count, summary_row)
+
+# Display table
+datatable(r_category_gene_count, 
+          extensions = c('Buttons', 
+                         'FixedColumns'), 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            fixedColumns = list(leftColumns = 1), # Freeze the first column
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Count of mutations in genes included in each ubiquitin category for Responders."
+        )
+```
+
+So, we have `r total_count` mutations in `r length(r_unique_ensembl_ids)` genes.
+
+## Non-responders
+
+```{r, warning=FALSE, message=FALSE}
+# Count how many genes each category has (NR)
+nr_category_gene_count <- nr_lof_ub_df %>% 
+  dplyr::group_by(category, description) %>%
+  dplyr::summarise(row_count = n()) %>%
+  dplyr::arrange(desc(row_count)) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::rename(mutation_count = row_count)
+
+# Get unique ensembl ids
+nr_unique_ensembl_ids <- nr_lof_ub_df %>% 
+  dplyr::select(ensembl_id) %>% 
+  dplyr::distinct() %>% 
+  dplyr::pull(ensembl_id)
+
+# Add total count row
+total_count <- sum(nr_category_gene_count$mutation_count)
+summary_row <- tibble(category = "Total", description = "All Categories", mutation_count = total_count)
+nr_category_gene_count <- bind_rows(nr_category_gene_count, summary_row)
+
+# Display table
+datatable(nr_category_gene_count, 
+          extensions = c('Buttons', 
+                         'FixedColumns'), 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=10,
+            fixedColumns = list(leftColumns = 1), # Freeze the first column
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Count of mutations in genes included in each ubiquitin category for Non-responders."
+        )
+```
+
+So, we have `r total_count` mutations in `r length(nr_unique_ensembl_ids)` genes.
+
+From these results, I can see that Responders have roughly the same amount of LoF mutations in ubiquitination and deubiquitination enzymes (76 and 73 respectively). On the other hand, Non-responders have a larger proportion of mutations in ubiquitination enzymes (38 and 17 respectively). These results are not aligned with our hypothesis, but I need to explore more.
+
+# Find commonalities and differences between response groups
+## Functional OverRepresentation Analysis (FORA)
+
+```{r, warning=FALSE, message=FALSE}
+# Perform FORA analysis
+# Define paths
+fora_results_all_csv_path <- file.path(results_ubfora_path, "fora_results_ubiquitin_all.csv")
+fora_results_nonsyn_csv_path <- file.path(results_ubfora_path, "fora_results_ubiquitin_nonsyn.csv")
+fora_results_lof_csv_path <- file.path(results_ubfora_path, "fora_results_ubiquitin_lof.csv")
+
+# Adapt structure to gene_sets_list
+gene_sets_df <- corrected_hsymbols_updated %>% 
+  dplyr::group_by(description) %>%
+  dplyr::summarise(ensembl_ids = list(unique(ensembl_id)), .groups = 'drop')
+
+# Convert the dataframe to a named list
+gene_sets_list <- setNames(gene_sets_df$ensembl_ids, gene_sets_df$description)
+
+# Perform FORA analysis for Ubiquitin Gene Sets
+# perform_fora_analysis(sample_id_list, list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, gene_sets_list=gene_sets_list)
+
+# Load fora results
+fora_results_ubiquitin_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
+fora_results_ubiquitin_nonsyn_df <- read.csv(fora_results_nonsyn_csv_path, header = TRUE)[ , -1]
+fora_results_ubiquitin_lof_df <- read.csv(fora_results_lof_csv_path, header = TRUE)[ , -1]
+```
+
+To do the ORA, I use the list of all LoF mutations and not the list of LoF mutations exclusive of ubi pathway as query because I want to check if the ubi gene sets are enriched in all LoF mutations, meaning that there is a significant number of genes belonging to those enzyme classes in my query compared to the background. As gene_sets, I need to provide all genes that are known to belong to these enzyme classes.
+
+## Explore shared mutated genes
+
+```{r, warning=FALSE, message=FALSE}
+#Fig7
+
+# Get genes for each response group
+responder_genes <- annot_lof_df_ubiquitin %>%
+  dplyr::filter(patient_response == "R") %>%
+  pull(corrected_hugo_symbol) %>%
+  unique()
+
+non_responder_genes <- annot_lof_df_ubiquitin %>%
+  dplyr::filter(patient_response == "NR") %>%
+  pull(corrected_hugo_symbol) %>%
+  unique()
+
+# Identify unique and shared genes
+shared_genes <- intersect(responder_genes, non_responder_genes)
+unique_responder_genes <- setdiff(responder_genes, shared_genes)
+unique_non_responder_genes <- setdiff(non_responder_genes, shared_genes)
+
+# Define the lists for the Venn diagram
+gene_lists <- list(
+  Responder = responder_genes,
+  Non_responder = non_responder_genes
+)
+
+# Set up PNG device to save the plot
+venn_path <- file.path(figures_ubfora_path, "venn_diagram_shared_genes.png")
+png(filename = venn_path, width = 1000, height = 700, res = 300)
+
+# Generate Venn diagram
+venn.plot <- draw.pairwise.venn(
+  area1 = length(responder_genes),
+  area2 = length(non_responder_genes),
+  cross.area = length(shared_genes),
+  category = c("Responders", "Non-responders"),
+  fill = c("#009E73", "#D55E00"),
+  cex = 1,        # Adjust font size of numbers
+  cat.cex = 1,  # Adjust category label font size
+  cat.col = c("black", "black"),
+  cat.pos = 0,         # Positions for category names (0 degrees, on top)
+  cat.dist = 0.07,     # Increase this if labels overlap with the circles
+  euler.d = TRUE,      # Force circles to be more circular
+  lwd = 2,      # Line width
+  filename = NULL
+)
+
+# Display the plot
+grid.newpage()
+grid.draw(venn.plot)
+
+# # Add shared gene labels
+# x_coords <- c(0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.87, 0.97)
+# y_coords <- c(0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05)
+# 
+# # Define starting points for the arrows
+# x_start <- 0.6
+# y_start <- 0.4
+# 
+# # Loop through each gene to add labels and arrows
+# for (i in seq_along(shared_genes)) {
+#   # Add gene label
+#   grid.text(shared_genes[i],
+#             x = x_coords[i],
+#             y = y_coords[i],
+#             just = c("center", "bottom"),
+#             gp = gpar(col = "black", fontsize = 6, fontface = "bold"))
+#   
+#   # Draw a line with an arrow pointing to each gene label
+#   grid.lines(x = c(x_start, x_coords[i]), y = c(y_start, y_coords[i]+0.04),
+#              arrow = arrow(type = "open", length = unit(1, "mm")),
+#              gp = gpar(col = "black", lwd = 1))
+# }
+
+# Save the plot
+dev.off()
+
+knitr::include_graphics(venn_path)
+```
+
+So they share `r length(shared_genes)` genes. Below is a table of these genes:
+
+```{r, warning=FALSE, message=FALSE}
+# Filter by shared genes
+shared_genes_df <- annot_lof_df_ubiquitin %>% 
+  dplyr::filter(corrected_hugo_symbol %in% shared_genes) %>% 
+  dplyr::select(corrected_hugo_symbol, category, description) %>% 
+  dplyr::distinct()
+
+# Display table
+datatable(shared_genes_df, 
+          extensions = c('Buttons', 
+                         'FixedColumns'), 
+          options = list(
+            dom = 'Bfrtip',
+            buttons = c('copy', 'excel', 'csv'),
+            scrollX=TRUE,
+            pageLength=11,
+            fixedColumns = list(leftColumns = 1), # Freeze the first column
+            columnDefs = list(list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return data === null ? 'NA' : data;",
+                "}"
+              )
+            ))
+          ),
+          caption = "Shared genes between Responders and Non-responders."
+        )
+```
+
+## MAFTools plots
+
+### Load data
+
+```{r, message=FALSE, warning=FALSE}
+# Add Tumor_Sample_Barcode to clinical_df
+mapping_df <- maf_df_annotated %>%
+  dplyr::select(sample_id, Tumor_Sample_Barcode) %>%
+  distinct()
+
+# Clean sup1_response_df
+clinical_resp_df <- sup1_response_df %>% 
+  dplyr::rename(sample_id = Sample.ID,
+                Patient_Response = Patient.Response) %>% 
+  dplyr::mutate(
+    Patient_Response = case_when(
+      Patient_Response == "R" ~ "Responders",
+      Patient_Response == "NR" ~ "Non-responders"
+    )
+  )
+
+clinical_resp_df <- clinical_resp_df %>%
+  left_join(mapping_df, by = "sample_id") %>% 
+  dplyr::rename(Sample_ID = sample_id)
+
+# Filter for LoF mutations
+lof_ubi_vep_maf <- annot_lof_df_ubiquitin %>% 
+  separate(Location, into = c("Chromosome", "Position"), sep = ":", convert = TRUE) %>%
+  separate(Position, into = c("Start_position", "End_position"), sep = "-", convert = TRUE) %>% 
+  dplyr::rename(alt_allele = Allele)
+
+# Filter maf_df_annotated based on matching rows in lof_vep_df_reduced
+lof_ubi_maf_df <- maf_df_annotated %>%
+  semi_join(lof_ubi_vep_maf, by = c("sample_id", "ensembl_id", "entrez_id", "Chromosome", "Start_position", "End_position", "alt_allele"))
+
+# Load maf with clinical data
+mm909 = read.maf(maf = lof_ubi_maf_df, clinicalData = clinical_resp_df)
+```
+
+### Summaries
+
+```{r, message=FALSE, warning=FALSE}
+## Shows sample summry.
+sample_sum <- getSampleSummary(mm909)
+getSampleSummary(mm909)
+
+## Shows gene summary.
+getGeneSummary(mm909)
+
+## Shows clinical data associated with samples
+getClinicalData(mm909)
+
+## Shows all fields in MAF
+getFields(mm909)
+
+## Writes maf summary to an output file with basename mm909
+write.mafSummary(maf = mm909, basename = file.path(figures_ubfora_path, 'mm909_ubi_lof'))
+```
+
+### Visualization
+
+```{r, message=FALSE, warning=FALSE}
+# Define output path
+plot_path1 <- file.path(figures_ubfora_path, "maf_ubi_lof_summary.png")
+
+# Open a PNG device
+png(filename = plot_path1, width = 3000, height = 1600, res = 300)
+
+# Generate the plot
+plotmafSummary(maf = mm909, rmOutlier = TRUE, addStat = 'median', dashboard = TRUE, titvRaw = FALSE)
+
+# Close the device
+dev.off()
+
+knitr::include_graphics(plot_path1)
+```
+
+```{r}
+# Get the summary of mutations per sample
+sample_summary <- getSampleSummary(mm909)
+
+# View the sample summary to understand the data structure
+print(sample_summary)
+```
+
+```{r, message=FALSE, warning=FALSE, fig.height=12, fig.width=8}
+# Fig8
+
+# Oncoplot for top 30 mutated genes.
+
+# Define output path
+plot_path2 <- file.path(figures_ubfora_path, "maf_ubi_lof_top30.png")
+
+# Open a PNG device
+png(filename = plot_path2, width = 3500, height = 4000, res = 300)
+
+#Color coding for response
+resp_colors = c("#009E73", "#D55E00")
+names(resp_colors) = c("Responders", "Non-responders")
+response_colors = list(Patient_Response = resp_colors)
+
+#Color coding for sample id
+sample_colors <- c(
+  "#56B4E9", "#999999", "#8A2BE2", "#E69F00", "#D55E00", "#CC79A7", 
+  "#009E73", "#F0E442", "#0072B2", "#FF69B4", "#FFD700", "#000000", 
+  "#00CED1", "#4B0082", "#1E90FF", "#FF6347", "#32CD32", "#8B4513", 
+  "#FF4500", "#B22222", "#FFDAB9", "#20B2AA"
+)
+names(sample_colors) = unique(maf_df_annotated$Sample_ID)
+sample_id_colors = list(Sample_ID = sample_colors)
+
+print(response_colors)
+
+# Generate plot
+oncoplot(maf = mm909, top = 30, drawColBar = FALSE, clinicalFeatures = 'Patient_Response', sortByAnnotation = TRUE, annotationColor = response_colors, anno_height = 0.25, legend_height = 1, showTitle = FALSE, drawBox = TRUE, legendFontSize = 1.7, annotationFontSize = 1.7)
+
+# Close the device
+dev.off()
+
+knitr::include_graphics(plot_path2)
+```
+
+## LoF mutations in all Ubiquitin genes in R and NR (both shared and unique)
+
+```{r, warning=FALSE, message=FALSE, fig.height=4, fig.width=10}
+# Fig9
+
+# Merge response info
+fora_ubi_lof_resp_df <- fora_results_ubiquitin_lof_df %>% 
+  dplyr::left_join(response_df, by="sample_id")
+
+# Filter for R
+fora_ubi_lof_df_r <- fora_ubi_lof_resp_df %>% 
+  dplyr::filter(patient_response == "R")
+
+## Define output path and plot
+fora_ubi_lof_df_r_path <- file.path(figures_ubfora_path, "ub_bubble_plot_R.png")
+fora_ubi_lof_df_r_plot <- bubble_plot_pval(response_df, fora_ubi_lof_df_r, fora_ubi_lof_df_r_path, "Responders", "Ubiquitin Gene Sets")
+print(fora_ubi_lof_df_r_plot)
+
+# Filter for NR
+fora_ubi_lof_df_nr <- fora_ubi_lof_resp_df %>% 
+  dplyr::filter(patient_response == "NR")
+
+## Define output path and plot
+fora_ubi_lof_df_nr_path <- file.path(figures_ubfora_path, "ub_bubble_plot_NR.png")
+fora_ubi_lof_df_nr_plot <- bubble_plot_pval(response_df, fora_ubi_lof_df_nr, fora_ubi_lof_df_nr_path, "Non-responders", "Ubiquitin Gene Sets")
+print(fora_ubi_lof_df_nr_plot)
+```
+
+Responders have some significative enrichment in deubiquitination enzymes while non-responders don't.
+
+<!-- ## LoF mutations in unique Ubiquitin genes in R and NR -->
+
+<!-- ```{r, message=FALSE, warning=FALSE} -->
+<!-- # Filter genes -->
+<!-- r_annot_lof_df_ubiquitin <- annot_lof_df_ubiquitin %>%  -->
+<!--   dplyr::filter(corrected_hugo_symbol %in% unique_responder_genes) -->
+<!-- nr_annot_lof_df_ubiquitin <- annot_lof_df_ubiquitin %>%  -->
+<!--   dplyr::filter(corrected_hugo_symbol %in% unique_non_responder_genes) -->
+
+<!-- # FORA -->
+<!-- # Define paths -->
+<!-- fora_results_all_csv_path_r <- file.path(results_ubfora_path, "fora_results_ubiquitin_all_r.csv") -->
+<!-- fora_results_nonsyn_csv_path_r <- file.path(results_ubfora_path, "fora_results_ubiquitin_nonsyn_r.csv") -->
+<!-- fora_results_lof_csv_path_r <- file.path(results_ubfora_path, "fora_results_ubiquitin_lof_r.csv") -->
+<!-- fora_results_all_csv_path_nr <- file.path(results_ubfora_path, "fora_results_ubiquitin_all_nr.csv") -->
+<!-- fora_results_nonsyn_csv_path_nr <- file.path(results_ubfora_path, "fora_results_ubiquitin_nonsyn_nr.csv") -->
+<!-- fora_results_lof_csv_path_nr <- file.path(results_ubfora_path, "fora_results_ubiquitin_lof_nr.csv") -->
+
+<!-- # Perform FORA analysis for Ubiquitin Gene Sets -->
+<!-- # perform_fora_analysis(sample_id_list, list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path_r, fora_results_nonsyn_csv_path_r, fora_results_lof_csv_path_r, gene_sets_list=gene_sets_list) -->
+<!-- # perform_fora_analysis(sample_id_list, list_of_all_mutations, list_of_nonsyn_mutations, list_of_lof_mutations, fora_results_all_csv_path_nr, fora_results_nonsyn_csv_path_nr, fora_results_lof_csv_path_nr, gene_sets_list=gene_sets_list) -->
+
+<!-- # Load fora results (only LoF) -->
+<!-- fora_results_ubiquitin_lof_df_r <- read.csv(fora_results_lof_csv_path_r, header = TRUE)[ , -1] -->
+<!-- fora_results_ubiquitin_lof_df_r <- fora_results_ubiquitin_lof_df_r %>%  -->
+<!-- dplyr::filter(!(sample_id %in% c("MM909_01", "MM909_20", "MM909_24", "MM909_29", "MM909_45"))) -->
+<!-- fora_results_ubiquitin_lof_df_nr <- read.csv(fora_results_lof_csv_path_nr, header = TRUE)[ , -1] -->
+<!-- fora_results_ubiquitin_lof_df_nr <- fora_results_ubiquitin_lof_df_nr %>%  -->
+<!-- dplyr::filter(!(sample_id %in% c("MM909_01", "MM909_20", "MM909_24", "MM909_29", "MM909_45"))) -->
+<!-- ``` -->
+
+<!-- ### Bubble plot -->
+
+<!-- This HAS the filter p.adjust < 0.05. -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=4} -->
+<!-- # Fig9 -->
+
+<!-- ## R -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_lof_plot_path_r <- file.path(figures_ubfora_path, -->
+<!--                               "ub_unique_bubble_plot_R.png") -->
+
+<!-- mm909_ubiquitin_lof_plot_r <- bubble_plot_pval(response_df, fora_results_ubiquitin_lof_df_r, mm909_ubiquitin_lof_plot_path_r, "Responders", "Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_lof_plot_r) -->
+
+<!-- ## NR -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_lof_plot_path_nr <- file.path(figures_ubfora_path, -->
+<!--                               "ub_unique_bubble_plot_NR.png") -->
+
+<!-- mm909_ubiquitin_lof_plot_nr <- bubble_plot_pval(response_df, fora_results_ubiquitin_lof_df_nr, mm909_ubiquitin_lof_plot_path_nr, "Non-responders", "Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_lof_plot_nr) -->
+<!-- ``` -->
+
+<!-- I don't see a clear pattern with the bubble plots.  -->
+
+<!-- ### Heat map -->
+
+<!-- This does not have the filter p.adjust < 0.05. -->
+
+<!-- ```{r, warning=FALSE, message=FALSE, fig.width=10, fig.height=6} -->
+<!-- plot_path_r <- file.path(figures_ubfora_path, "ub_unique_heat_map_R.pdf") -->
+<!-- combinedGS_lof_plot_r <- complex_heatmap_genesets(response_df, fora_results_ubiquitin_lof_df_r, plot_path_r,  -->
+<!--                                     "Heat Map gene counts per Gene Set stratified by patient (Responders)", 16, 6) -->
+
+<!-- # Print -->
+<!-- print(combinedGS_lof_plot_r) -->
+
+<!-- plot_path_nr <- file.path(figures_ubfora_path, "ub_unique_heat_map_NR.pdf") -->
+<!-- combinedGS_lof_plot_nr <- complex_heatmap_genesets(response_df, fora_results_ubiquitin_lof_df_nr, plot_path_nr,  -->
+<!--                                     "Heat Map gene counts per Gene Set stratified by patient (Non-responders)", 16, 6) -->
+
+<!-- # Print -->
+<!-- print(combinedGS_lof_plot_nr) -->
+<!-- ``` -->
+
+<!-- ## LoF mutations in shared Ubiquitin genes in R and NR -->
+
+<!-- ```{r, message=FALSE, warning=FALSE} -->
+<!-- # Filter genes -->
+<!-- shared_annot_lof_df_ubiquitin <- annot_lof_df_ubiquitin %>%  -->
+<!--   dplyr::filter(corrected_hugo_symbol %in% shared_genes) -->
+
+<!-- # FORA -->
+<!-- # Define paths -->
+<!-- fora_results_all_csv_path_share <- file.path(results_ubfora_path, "fora_results_ubiquitin_all_share.csv") -->
+<!-- fora_results_nonsyn_csv_path_share <- file.path(results_ubfora_path, "fora_results_ubiquitin_nonsyn_share.csv") -->
+<!-- fora_results_lof_csv_path_share <- file.path(results_ubfora_path, "fora_results_ubiquitin_lof_share.csv") -->
+
+<!-- # Adapt structure to gene_sets_list -->
+<!-- gene_sets_df_share <- shared_annot_lof_df_ubiquitin %>%  -->
+<!--   dplyr::group_by(description) %>% -->
+<!--   dplyr::summarise(ensembl_ids = list(unique(ensembl_id)), .groups = 'drop') -->
+
+<!-- # Convert the dataframe to a named list -->
+<!-- gene_sets_list_share <- setNames(gene_sets_df_share$ensembl_ids, gene_sets_df_share$description) -->
+
+<!-- # Perform FORA analysis for Ubiquitin Gene Sets -->
+<!-- perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path_share, fora_results_nonsyn_csv_path_share, fora_results_lof_csv_path_share, gene_sets_list=gene_sets_list_share) -->
+
+<!-- # Load fora results (only LoF) -->
+<!-- fora_results_ubiquitin_lof_df_share <- read.csv(fora_results_lof_csv_path_share, header = TRUE)[ , -1] -->
+<!-- ``` -->
+
+<!-- ### Bubble plot -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=4} -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_lof_plot_path_share <- file.path(figures_ubfora_path, -->
+<!--                               "ub_unique_bubble_plot_R_NR.png") -->
+
+<!-- mm909_ubiquitin_lof_plot_share <- plot_top5(response_df, fora_results_ubiquitin_lof_df_share, mm909_ubiquitin_lof_plot_path_share, "FORA with 5 Ubiquitin GS across samples (LoF mutations) shared genes", "Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_lof_plot_share) -->
+<!-- ``` -->
+
+## Annotation of GO terms to LoF mutations in Ubiquitin genes
+
+```{r, warning=FALSE, message=FALSE}
+ub_db_csv_path <- file.path(results_ubi_db_path, "ub_db.csv")
+final_ub_db_df <- read.csv(ub_db_csv_path, header = TRUE)[ , -1]
+
+# Filter for genes present in R & NR
+final_ub_db_df <- final_ub_db_df %>% 
+  dplyr::filter(ensembl_id %in% glob_unique_ensembl_ids)
+
+# Left join
+ubi_lof_go_class_df <- final_ub_db_df %>% 
+  dplyr::rename(category_db = category) %>% 
+  dplyr::left_join(annot_lof_df_ubiquitin, by="ensembl_id") %>% 
+  dplyr::distinct()
+
+# Save to file
+ubi_lof_go_class_path <- file.path(results_ubfora_path, 
+                      "ubi_lof_go_class.rds")
+saveRDS(ubi_lof_go_class_df, file = ubi_lof_go_class_path)
+
+# Filter genes
+ubi_lof_go_class_df_r <- ubi_lof_go_class_df %>% 
+  dplyr::filter(corrected_hugo_symbol %in% unique_responder_genes)
+ubi_lof_go_class_df_nr <- ubi_lof_go_class_df %>% 
+  dplyr::filter(corrected_hugo_symbol %in% unique_non_responder_genes)
+```
+
+
+<!-- ```{r} -->
+<!-- # FORA -->
+<!-- # Define paths -->
+<!-- fora_results_all_csv_path_r2 <- file.path(results_ubfora_path, "fora_results_ubiquitin_all_r2.csv") -->
+<!-- fora_results_nonsyn_csv_path_r2 <- file.path(results_ubfora_path, "fora_results_ubiquitin_nonsyn_r2.csv") -->
+<!-- fora_results_lof_csv_path_r2 <- file.path(results_ubfora_path, "fora_results_ubiquitin_lof_r2.csv") -->
+<!-- fora_results_all_csv_path_nr2 <- file.path(results_ubfora_path, "fora_results_ubiquitin_all_nr2.csv") -->
+<!-- fora_results_nonsyn_csv_path_nr2 <- file.path(results_ubfora_path, "fora_results_ubiquitin_nonsyn_nr2.csv") -->
+<!-- fora_results_lof_csv_path_nr2 <- file.path(results_ubfora_path, "fora_results_ubiquitin_lof_nr2.csv") -->
+
+<!-- # Adapt structure to gene_sets_list -->
+<!-- gene_sets_df_r2 <- r_final_ub_db_df %>%  -->
+<!--   dplyr::group_by(go_parent_term) %>% -->
+<!--   dplyr::summarise(ensembl_ids = list(unique(ensembl_id)), .groups = 'drop') -->
+<!-- gene_sets_df_nr2 <- nr_final_ub_db_df %>%  -->
+<!--   dplyr::group_by(go_parent_term) %>% -->
+<!--   dplyr::summarise(ensembl_ids = list(unique(ensembl_id)), .groups = 'drop') -->
+
+<!-- # Convert the dataframe to a named list -->
+<!-- gene_sets_list_r2 <- setNames(gene_sets_df_r2$ensembl_ids, gene_sets_df_r2$go_parent_term) -->
+<!-- gene_sets_list_nr2 <- setNames(gene_sets_df_nr2$ensembl_ids, gene_sets_df_nr2$go_parent_term) -->
+
+<!-- # Perform FORA analysis for Ubiquitin Gene Sets -->
+<!-- # perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path_r2, fora_results_nonsyn_csv_path_r2, fora_results_lof_csv_path_r2, gene_sets_list=gene_sets_list_r2) -->
+<!-- # perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path_nr2, fora_results_nonsyn_csv_path_nr2, fora_results_lof_csv_path_nr2, gene_sets_list=gene_sets_list_nr2) -->
+
+<!-- # Load fora results (only LoF) -->
+<!-- fora_results_ubiquitin_lof_df_r2 <- read.csv(fora_results_lof_csv_path_r2, header = TRUE)[ , -1] -->
+<!-- fora_results_ubiquitin_lof_df_r2 <- fora_results_ubiquitin_lof_df_r2 %>%  -->
+<!--   dplyr::filter(!(sample_id %in% c("MM909_01", "MM909_20", "MM909_24", "MM909_29", "MM909_45"))) -->
+<!-- fora_results_ubiquitin_lof_df_nr2 <- read.csv(fora_results_lof_csv_path_nr2, header = TRUE)[ , -1] -->
+<!-- fora_results_ubiquitin_lof_df_nr2 <- fora_results_ubiquitin_lof_df_nr2 %>%  -->
+<!--   dplyr::filter(!(sample_id %in% c("MM909_01", "MM909_20", "MM909_24", "MM909_29", "MM909_45"))) -->
+<!-- ``` -->
+
+<!-- ### Bubble plot -->
+
+<!-- This does not have the filter p.adjust < 0.05. -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=4} -->
+<!-- ## R -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_lof_plot_path_r2 <- file.path(figures_ubfora_path, -->
+<!--                               "ub_unique_bubble_plot_R2.png") -->
+
+<!-- mm909_ubiquitin_lof_plot_r2 <- bubble_plot_pval(response_df, fora_results_ubiquitin_lof_df_r2, mm909_ubiquitin_lof_plot_path_r2, "FORA with Ubiquitin GS across samples (LoF mutations) for Responders", "Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_lof_plot_r2) -->
+
+<!-- ## NR -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_lof_plot_path_nr2 <- file.path(figures_ubfora_path, -->
+<!--                               "ub_unique_bubble_plot_NR2.png") -->
+
+<!-- mm909_ubiquitin_lof_plot_nr2 <- bubble_plot_pval(response_df, fora_results_ubiquitin_lof_df_nr2, mm909_ubiquitin_lof_plot_path_nr2, "FORA with Ubiquitin GS across samples (LoF mutations) for Non-responders", "Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_lof_plot_nr2) -->
+<!-- ``` -->
+
+<!-- ### Heat map -->
+
+<!-- This does not have the filter p.adjust < 0.05. -->
+
+<!-- ```{r, warning=FALSE, message=FALSE, fig.width=10, fig.height=6} -->
+<!-- plot_path_r2 <- file.path(figures_ubfora_path, "ub_unique_heat_map_R2.pdf") -->
+<!-- combinedGS_lof_plot_r2 <- complex_heatmap_genesets(response_df, fora_results_ubiquitin_lof_df_r2, plot_path_r2,  -->
+<!--                                     "Heat Map gene counts per Gene Set stratified by patient (Responders)", 16, 6) -->
+
+<!-- # Print -->
+<!-- print(combinedGS_lof_plot_r2) -->
+
+<!-- plot_path_nr2 <- file.path(figures_ubfora_path, "ub_unique_heat_map_NR2.pdf") -->
+<!-- combinedGS_lof_plot_nr2 <- complex_heatmap_genesets(response_df, fora_results_ubiquitin_lof_df_nr2, plot_path_nr2,  -->
+<!--                                     "Heat Map gene counts per Gene Set stratified by patient (Non-responders)", 16, 6) -->
+
+<!-- # Print -->
+<!-- print(combinedGS_lof_plot_nr2) -->
+<!-- ``` -->
+
+## Clustering by GO parent BP (C5 - BP)
+
+```{r}
+# Filter genes
+r_final_ub_db_df <- ubi_lof_go_class_df %>% 
+  dplyr::filter(corrected_hugo_symbol %in% unique_responder_genes) %>% 
+  dplyr::select(sample_id, ensembl_id, corrected_hugo_symbol, go_parent_term) %>% 
+  dplyr::distinct()
+r_final_ub_db_df$source <- "R"
+nr_final_ub_db_df <- ubi_lof_go_class_df %>% 
+  dplyr::filter(corrected_hugo_symbol %in% unique_non_responder_genes) %>% 
+  dplyr::select(sample_id, ensembl_id, corrected_hugo_symbol, go_parent_term) %>% 
+  dplyr::distinct()
+nr_final_ub_db_df$source <- "NR"
+shared_final_ub_db_df <- ubi_lof_go_class_df %>% 
+  dplyr::filter(corrected_hugo_symbol %in% shared_genes) %>% 
+  dplyr::select(sample_id, ensembl_id, corrected_hugo_symbol, go_parent_term) %>% 
+  dplyr::distinct()
+shared_final_ub_db_df$source <- "Shared"
+
+# Combine all data.frames into one
+combined_df <- rbind(r_final_ub_db_df, nr_final_ub_db_df, shared_final_ub_db_df)
+
+# Merge response
+final_go_df <- combined_df %>% 
+  dplyr::left_join(response_df, by="sample_id")
+
+# Save to file
+unique_shared_genes_path <- file.path(results_ubfora_path, 
+                      "unique_and_shared_genes_RandNR.rds")
+saveRDS(final_go_df, file = unique_shared_genes_path)
+```
+
+```{r, warning=FALSE, message=FALSE, fig.width=18, fig.height=8}
+# Fig10
+
+# Count occurrences of each cell_loc per sample_id
+counts_df <- final_go_df %>%
+  group_by(sample_id, go_parent_term) %>%
+  summarise(count = n(), .groups = 'drop')
+
+# Summarize by patient_response
+summary_df <- counts_df %>%
+  left_join(final_go_df %>% dplyr::select(sample_id, patient_response) %>% distinct(), by = "sample_id") %>%
+  group_by(patient_response, go_parent_term) %>%
+  summarise(
+    total_count = sum(count),
+    std_dev = sd(count),
+    .groups = 'drop'
+  )
+
+# Calculate p-values using Wilcoxon test
+wilcox_results <- counts_df %>%
+  left_join(final_go_df %>% dplyr::select(sample_id, patient_response) %>% distinct(), by = "sample_id") %>%
+  group_by(go_parent_term) %>%
+  summarise(
+    p_value = if (n_distinct(patient_response) == 2) 
+                wilcox.test(count ~ patient_response)$p.value 
+              else NA,
+    .groups = 'drop'
+  ) %>%
+  mutate(p_value = ifelse(is.nan(p_value), NA, p_value))
+
+# Combine summary statistics and p-values
+final_stats <- summary_df %>%
+  left_join(wilcox_results, by = "go_parent_term") %>% 
+  mutate(p_value_label = case_when(
+    is.na(p_value) ~ NA_character_,
+    TRUE ~ paste0("p=", format(p_value, digits = 2))
+  ))
+
+# Calculate the maximum count to set the y-axis limit dynamically
+max_count <- max(final_stats$total_count, na.rm = TRUE)
+buffer <- max_count * 0.1 # Add 10% buffer to the maximum count for the labels
+
+# Plotting
+plot <- ggplot(final_stats, aes(x = go_parent_term, y = total_count, fill = patient_response)) +
+  geom_bar(stat = "identity", position = position_dodge(), width = 0.8) +
+  geom_errorbar(aes(ymin = total_count - std_dev, ymax = total_count + std_dev), 
+                position = position_dodge(0.8), width = 0.25) +
+  scale_fill_manual(values = c("R" = "#009E73", "NR" = "#D55E00"),
+                    labels = c("R" = "Responders", "NR" = "Non-responders")) +
+  labs(title = NULL,
+       x = "GO Term",
+       y = "Gene counts",
+       fill = "Patient Response") +
+  ylim(0, max_count + buffer) + # Adjust the y-axis to include the buffer
+  theme_minimal() +
+  theme(
+      panel.grid.major = element_line(color = "lightgrey", linewidth = 0.5),
+      panel.grid.minor = element_blank(),
+      panel.background = element_rect(fill = "white", colour = "black"),
+      plot.background = element_rect(fill = "white", colour = NA),
+      axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +  # Rotate X-axis labels for better readability
+  scale_y_continuous(breaks = seq(0, max_count + 25, by = 5),  # Ticks every 5 units
+                     minor_breaks = seq(0, max_count + 25, by = 1))  # Minor ticks every 1 unit
+
+# Add the p-value text labels
+plot <- plot + geom_text(data = final_stats, aes(x = go_parent_term, y = max_count + buffer / 2, label = p_value_label), 
+                         vjust = -2.4, hjust = 0.5, size = 4, color = "black")
+
+plot_path <- file.path(figures_ubfora_path, "go_terms_barplot.png")
+ggsave(plot_path, plot, width = 18, height = 8, dpi = 300)
+print(plot)
+```
+
+I don't see all 40 go parent terms because not all of them are present in the lof ubi mutations.
+
+This bar plot shows unique genes in R, NR and shared. However, a gene may participate in different biological processes, and that is why the sum is not 106 (number of total ubiquitin genes in the patients), but more. I don't see that the shared genes belong to a particular category, they are quite scattered. I see that Responders have more mutated genes in all the BP they share with Non-responders, which is in accordance with the fact that they have more mutations overall. Some BP are unique to responders: chromatin organization, regulation of cell cycle, regulation of DNA-templated transcription.
+
+<!-- ## Analysis of Cellular Compartment for R and NR genes with LoF (C5 - CC) -->
+
+<!-- C5 consists of gene sets derived from the Gene Ontology (GO) annotations. Here, we focus on Gene sets derived from the GO Cellular Component (CC) ontology. -->
+
+<!-- ```{r, message=FALSE, warning=FALSE} -->
+<!-- # Get all C5 CC mapped to ensembl ids -->
+<!-- # Left join CC to data.frames of unique R, unique NR and shared (by ensembl_id) -->
+<!-- # Check results (bar plot? venn diagram?) -->
+<!-- # Get the previous df and split into unique_R, unique_NR, shared -->
+<!-- # Cluster by cc, color by go cc, shape by response group. -->
+<!-- ``` -->
+
+<!-- ### Bubble plot -->
+
+<!-- This does not have the filter p.adjust < 0.05. -->
+
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=10, fig.height=4} -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_lof_plot_path_r_cc <- file.path(figures_ubfora_path, -->
+<!--                               "ub_unique_bubble_plot_R_cc.png") -->
+
+<!-- mm909_ubiquitin_lof_plot_r_cc <- bubble_plot_pval(response_df, fora_results_ubiquitin_lof_df_r_cc, mm909_ubiquitin_lof_plot_path_r_cc, "FORA with Ubiquitin GS across samples (LoF mutations) for Responders", "Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_lof_plot_r_cc) -->
+
+<!-- ## NR -->
+<!-- # Define output path -->
+<!-- mm909_ubiquitin_lof_plot_path_nr_cc <- file.path(figures_ubfora_path, -->
+<!--                               "ub_unique_bubble_plot_NR_cc.png") -->
+
+<!-- mm909_ubiquitin_lof_plot_nr_cc <- bubble_plot_pval(response_df, fora_results_ubiquitin_lof_df_nr_cc, mm909_ubiquitin_lof_plot_path_nr_cc, "FORA with Ubiquitin GS across samples (LoF mutations) for Non-responders", "Ubiquitin Gene Sets") -->
+
+<!-- print(mm909_ubiquitin_lof_plot_nr_cc) -->
+<!-- ``` -->
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

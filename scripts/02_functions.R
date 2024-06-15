@@ -4,26 +4,6 @@
 
 ### Functions needed for the project
 
-## Load libraries
-library(dplyr)
-library(msigdbr)
-library(fgsea)
-library(EnsDb.Hsapiens.v75)
-library(EnsDb.Hsapiens.v86)
-library(clusterProfiler)
-library(GO.db)
-library(ComplexHeatmap)
-library(circlize)
-library(reshape2)
-library(gridtext)
-library(ggnewscale)
-library(patchwork)
-library(ggpubr)
-library(cowplot)
-library(ggplot2)
-library(pheatmap)
-library(ggplotify)
-
 # Color blind friendly palette
 cbPalette <- c("#56B4E9", "#999999", "#8A2BE2", "#E69F00", "#D55E00", "#CC79A7", "#009E73", "#F0E442", "#0072B2", "#FF69B4", "#FFD700", "#000000", "#00CED1", "#4B0082")
 
@@ -175,7 +155,8 @@ searchGOTerms <- function(keyword) {
 
 # Bar Plot that summarizes the mutation count for each patient
 sum_plot <- function(response_df, all_mut_df, nonsyn_mut_df, lof_mut_df, plot_path, select_r = FALSE) {
-  all_sample_ids <- unique(c(all_mut_df$sample_id, nonsyn_mut_df$sample_id, lof_mut_df$sample_id))
+  # Ensure all sample IDs are included, even those with no mutations
+  all_sample_ids <- unique(c(all_mut_df$sample_id, nonsyn_mut_df$sample_id, lof_mut_df$sample_id, response_df$sample_id))
   
   # Prepare a combined_df
   combined_df <- bind_rows(
@@ -194,7 +175,7 @@ sum_plot <- function(response_df, all_mut_df, nonsyn_mut_df, lof_mut_df, plot_pa
     dplyr::summarise(count = n(), .groups = 'drop') %>%
     tidyr::complete(sample_id = all_sample_ids, source, fill = list(count = 0)) %>% # Ensure every sample_id and source combination is represented
     dplyr::ungroup()
-    
+  
   # Merge response info
   combined_data <- count_df %>%
     dplyr::left_join(response_df, by = "sample_id")
@@ -223,12 +204,10 @@ sum_plot <- function(response_df, all_mut_df, nonsyn_mut_df, lof_mut_df, plot_pa
   # Step 3: Arrange 'combined_data' using the new order and then by 'source' to keep its internal order
   ordered_data <- combined_data %>%
     dplyr::left_join(response_order %>% 
-                     dplyr::select(sample_id, order), by = "sample_id") %>% 
+                       dplyr::select(sample_id, order), by = "sample_id") %>% 
     dplyr::arrange(order, source) %>%
     dplyr::select(-order) %>% # Optionally remove the 'order' column if it's no longer needed
     dplyr::mutate(sample_id = factor(sample_id, levels = unique(sample_id)))
-  
-  # ordered_data$facet_label <- factor(ordered_data$facet_label, levels = unique(ordered_data$facet_label))
   
   # Calculate the maximum count and buffer again just in case
   max_count <- max(ordered_data$count, na.rm = TRUE)
@@ -446,80 +425,80 @@ perform_cP_fora_analysis <- function(sample_id_list, all_mut_list, nonsyn_mut_li
   return(results_lists)
 }
 
-# Bubble Plot top 5 Gene Sets across samples stratified by response
-plot_top5 <- function(response_df, mut_df, plot_path, fig_title, fig_y_label) {
-  
-  # Prepare data for all samples in the df: Filter padjust < 0.05 & calculate Gene ratio per sample
-  prepared_data_df <- mut_df %>%
-    dplyr::group_by(sample_id) %>%
-    dplyr::filter(padj < 0.05) %>%
-    dplyr::mutate(Gene_ratio = overlap / size,
-                  Count = overlap) %>%
-    dplyr::slice_min(order_by = padj, n = 5) %>%
-    dplyr::arrange(sample_id, desc(Count)) %>%
-    dplyr::ungroup()
-
-  # Merge response info
-  combined_data <- prepared_data_df %>%
-    dplyr::left_join(response_df, by = "sample_id")
-
-  # Step 1: Create an ordered factor for sample_id based on patient_response
-  # First, create a mapping of sample_id to patient_response
-  response_order <- combined_data %>%
-    dplyr::select(sample_id, patient_response) %>%
-    dplyr::distinct() %>%
-    dplyr::arrange(patient_response, sample_id) # Arrange so that "R" comes before "NR"
-
-  # Use this ordering to reorder sample_id in the combined data
-  combined_data$sample_id <- factor(combined_data$sample_id,
-                                    levels = response_order$sample_id)
-  
-  # Calculate dynamic breaks and labels for Count
-  count_breaks <- quantile(combined_data$Count, probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
-  count_breaks <- round(count_breaks) # Ensure count_breaks are integers by rounding
-  count_breaks <- count_breaks[count_breaks > 0] # Remove 0 values from count_breaks
-  count_breaks <- unique(count_breaks) # Make sure breaks are unique
-  
-  # Dynamically generate count_labels based on the available count_breaks
-  count_labels <- vector("character", length(count_breaks))
-  for (i in seq_along(count_breaks)) {
-    count_labels[i] <- as.character(count_breaks[i])
-  }
-  
-  # Step 2: Plot with ordered sample_id and facets to distinguish "R" and "NR"
-  top5_plot <- ggplot(combined_data, aes(x = sample_id,
-                                              y = reorder(pathway, Count),
-                                              size = Count,
-                                              color = padj)) +
-    geom_point() +
-    scale_color_gradient(low = "blue", high = "red", trans = "log10", # Log10 transformation for a better visualization
-                         limits = c(1e-6, 1), oob = scales::oob_squish) +
-    scale_size_continuous(name = "Count",
-                          range = c(1, 6),  # Adjust the visual size range as needed
-                          breaks = count_breaks,
-                          labels = count_labels) +
-    facet_grid(. ~ patient_response, scales = "free_x", space = "free_x") +
-    theme_minimal() +
-    theme(
-      panel.grid.major = element_line(color = "grey", linewidth = 0.5),
-      panel.grid.minor = element_blank(),
-      panel.background = element_rect(fill = "white", colour = "black"),
-      plot.background = element_rect(fill = "white", colour = NA),
-      legend.position = "right",
-      axis.text.x = element_text(angle = 45, hjust = 1)
-    ) +
-    labs(title = fig_title,
-         x = "Sample ID",
-         y = fig_y_label,
-         color = "p.adjust (log10)",
-         size = "Count")
-
-  # Save plot
-  ggsave(plot_path, top5_plot, width = 15, height = 20, dpi = 300)
-  
-  # Return
-  return(top5_plot)
-}
+# # Bubble Plot top 5 Gene Sets across samples stratified by response
+# plot_top5 <- function(response_df, mut_df, plot_path, fig_title, fig_y_label) {
+#   
+#   # Prepare data for all samples in the df: Filter padjust < 0.05 & calculate Gene ratio per sample
+#   prepared_data_df <- mut_df %>%
+#     dplyr::group_by(sample_id) %>%
+#     dplyr::filter(padj < 0.05) %>%
+#     dplyr::mutate(Gene_ratio = overlap / size,
+#                   Count = overlap) %>%
+#     dplyr::slice_min(order_by = padj, n = 5) %>%
+#     dplyr::arrange(sample_id, desc(Count)) %>%
+#     dplyr::ungroup()
+# 
+#   # Merge response info
+#   combined_data <- prepared_data_df %>%
+#     dplyr::left_join(response_df, by = "sample_id")
+# 
+#   # Step 1: Create an ordered factor for sample_id based on patient_response
+#   # First, create a mapping of sample_id to patient_response
+#   response_order <- combined_data %>%
+#     dplyr::select(sample_id, patient_response) %>%
+#     dplyr::distinct() %>%
+#     dplyr::arrange(patient_response, sample_id) # Arrange so that "R" comes before "NR"
+# 
+#   # Use this ordering to reorder sample_id in the combined data
+#   combined_data$sample_id <- factor(combined_data$sample_id,
+#                                     levels = response_order$sample_id)
+#   
+#   # Calculate dynamic breaks and labels for Count
+#   count_breaks <- quantile(combined_data$Count, probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
+#   count_breaks <- round(count_breaks) # Ensure count_breaks are integers by rounding
+#   count_breaks <- count_breaks[count_breaks > 0] # Remove 0 values from count_breaks
+#   count_breaks <- unique(count_breaks) # Make sure breaks are unique
+#   
+#   # Dynamically generate count_labels based on the available count_breaks
+#   count_labels <- vector("character", length(count_breaks))
+#   for (i in seq_along(count_breaks)) {
+#     count_labels[i] <- as.character(count_breaks[i])
+#   }
+#   
+#   # Step 2: Plot with ordered sample_id and facets to distinguish "R" and "NR"
+#   top5_plot <- ggplot(combined_data, aes(x = sample_id,
+#                                               y = reorder(pathway, Count),
+#                                               size = Count,
+#                                               color = padj)) +
+#     geom_point() +
+#     scale_color_gradient(low = "blue", high = "red", trans = "log10", # Log10 transformation for a better visualization
+#                          limits = c(1e-6, 1), oob = scales::oob_squish) +
+#     scale_size_continuous(name = "Count",
+#                           range = c(1, 6),  # Adjust the visual size range as needed
+#                           breaks = count_breaks,
+#                           labels = count_labels) +
+#     facet_grid(. ~ patient_response, scales = "free_x", space = "free_x") +
+#     theme_minimal() +
+#     theme(
+#       panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+#       panel.grid.minor = element_blank(),
+#       panel.background = element_rect(fill = "white", colour = "black"),
+#       plot.background = element_rect(fill = "white", colour = NA),
+#       legend.position = "right",
+#       axis.text.x = element_text(angle = 45, hjust = 1)
+#     ) +
+#     labs(title = fig_title,
+#          x = "Sample ID",
+#          y = fig_y_label,
+#          color = "p.adjust (log10)",
+#          size = "Count")
+# 
+#   # Save plot
+#   ggsave(plot_path, top5_plot, width = 15, height = 20, dpi = 300)
+#   
+#   # Return
+#   return(top5_plot)
+# }
 
 # Bubble Plot all Gene Sets across samples with pvalue significance
 bubble_plot_pval <- function(response_df, mut_df, plot_path, fig_title, fig_y_label) {
@@ -531,7 +510,12 @@ bubble_plot_pval <- function(response_df, mut_df, plot_path, fig_title, fig_y_la
     dplyr::mutate(Gene_ratio = overlap / size,
                   Count = overlap) %>%
     dplyr::arrange(sample_id, desc(Count)) %>%
-    dplyr::ungroup()
+    dplyr::ungroup() %>% 
+    dplyr::mutate(short_sample_id = sub(".*_(\\d+)$", "\\1", sample_id))  # Extract the numeric part from sample_id
+  
+  # Complete the data to ensure all pathways are present
+  complete_data_df <- prepared_data_df %>%
+    tidyr::complete(pathway = unique(mut_df$pathway), fill = list(Gene_ratio = NA, Count = NA, padj = NA))
   
   # Calculate dynamic breaks and labels for Count
   count_breaks <- quantile(prepared_data_df$Count, probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
@@ -546,17 +530,21 @@ bubble_plot_pval <- function(response_df, mut_df, plot_path, fig_title, fig_y_la
   }
   
   # Step 2: Plot
-  bubble_plot <- ggplot(prepared_data_df, aes(x = Gene_ratio,
-                                         y = reorder(pathway, Count),
-                                         size = Count,
-                                         color = padj)) +
-    geom_point() +
-    scale_color_gradient(low = "blue", high = "red", trans = "log10", # Log10 transformation for a better visualization
-                         limits = c(1e-6, 1), oob = scales::oob_squish) +
+  bubble_plot <- ggplot(complete_data_df, aes(x = Gene_ratio,
+                                              y = reorder(pathway, Count),
+                                              size = Count,
+                                              fill = padj)) +
+    geom_point(shape = 21, stroke = 0.5, color = "black") +  # Add black outline to the dots
+    geom_label_repel(aes(label = short_sample_id), size = 3, color = "black", 
+                     box.padding = 0.8, point.padding = 0.3, segment.color = "black", 
+                     max.overlaps = 50, max.time = 2, alpha = 0.5, fill = "white") +  # Add sample_id labels with repel and edge
+    scale_fill_gradient(low = "#D55E00", high = "#F0E442") +  # Fill gradient
     scale_size_continuous(name = "Count",
                           range = c(1, 6),  # Adjust the visual size range as needed
                           breaks = count_breaks,
                           labels = count_labels) +
+    scale_x_continuous(breaks = seq(0, 0.08, by = 0.01)) +
+    xlim(0,0.08) +
     theme_minimal() +
     theme(
       panel.grid.major = element_line(color = "grey", linewidth = 0.5),
@@ -569,8 +557,8 @@ bubble_plot_pval <- function(response_df, mut_df, plot_path, fig_title, fig_y_la
     labs(title = fig_title,
          x = "Gene Ratio",
          y = fig_y_label,
-         color = "p.adjust (log10)",
-         size = "Count")
+         fill = "Adjusted p-value",
+         size = "Gene count")
   
   # Save plot
   ggsave(plot_path, bubble_plot, width = 15, height = 20, dpi = 300)
@@ -1137,7 +1125,7 @@ tile_plot_pfam <- function(mut_df, plot_path, fig_title, width, height) {
   mut_df$source <- as.factor(mut_df$source)
   
   # Define the color mapping for 'source'
-  color_mapping <- c("R" = "darkgreen", "NR" = "darkred", "Shared" = "purple")
+  color_mapping <- c("R" = "#009E73", "NR" = "#D55E00", "Shared" = "#8A2BE2")
   
   # Create the plot
   tile_plot <- ggplot(mut_df, aes(x = dom_name, y = corrected_hugo_symbol, fill = source)) +
@@ -1146,51 +1134,12 @@ tile_plot_pfam <- function(mut_df, plot_path, fig_title, width, height) {
     labs(x = "Domain Name", y = "HUGO Symbol", fill = "Source", title = fig_title) +
     theme_minimal() +  # Clean minimalistic theme
     theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x labels for better readability
-          axis.title = element_text(size = 12, face = "bold"))  # Bold axis titles
-  
-  # Save plot
-  ggsave(plot_path, tile_plot, width = width, height = height, dpi = 300, limitsize = FALSE)
-  
-  # Return
-  return(tile_plot)
-}
-
-# Clustering of PFAM domains using ComplexHeatmap
-clustering_pfam <- function(mut_df, plot_path, fig_title, width, height) {
-  
-  # Convert to factors
-  mut_df$corrected_hugo_symbol <- as.factor(mut_df$corrected_hugo_symbol)
-  mut_df$dom_name <- as.factor(mut_df$dom_name)
-  mut_df$source <- as.factor(mut_df$source)
-  
-  # Convert 'source' into a numeric matrix for clustering
-  mut_df_numeric <- mut_df %>%
-    dplyr::mutate(source_numeric = as.numeric(as.factor(source))) %>%
-    dcast(corrected_hugo_symbol ~ dom_name, value.var = "source_numeric", fill = 0)
-  
-  # Perform hierarchical clustering
-  row_clusters <- hclust(dist(mut_df_numeric[,-1]), method = "ward.D2")
-  col_clusters <- hclust(dist(t(mut_df_numeric[,-1])), method = "ward.D2")
-  
-  # Reorder rows and columns based on clustering
-  mut_df <- mut_df %>%
-    dplyr::mutate(
-      corrected_hugo_symbol = factor(corrected_hugo_symbol, levels = mut_df_numeric$corrected_hugo_symbol[row_clusters$order]),
-      dom_name = factor(dom_name, levels = names(col_clusters$order))
-    )
-  
-  # Define the color mapping for 'source'
-  color_mapping <- c("R" = "darkgreen", "NR" = "darkred", "Shared" = "purple")
-  
-  # Create the plot
-  # Updated plotting function
-  tile_plot <- ggplot(mut_df, aes(x = dom_name, y = corrected_hugo_symbol, fill = source)) +
-    geom_tile(color = "white") +  # Add white borders for clarity
-    scale_fill_manual(values = color_mapping) +  # Use custom colors
-    labs(x = "Domain Name", y = "HUGO Symbol", fill = "Source", title = fig_title) +
-    theme_minimal() +  # Clean minimalistic theme
-    theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x labels for better readability
-          axis.title = element_text(size = 12, face = "bold"))  # Bold axis titles
+          axis.title = element_text(size = 12, face = "bold"), # Bold axis titles
+          legend.background = element_rect(fill = "white", color = NA),
+          panel.grid.major = element_line(color = "grey", linewidth = 0.5),
+          panel.grid.minor = element_blank(),
+          panel.background = element_rect(fill = "white", color = NA),
+          plot.background = element_rect(fill = "white", color = NA))
   
   # Save plot
   ggsave(plot_path, tile_plot, width = width, height = height, dpi = 300, limitsize = FALSE)
@@ -1200,20 +1149,86 @@ clustering_pfam <- function(mut_df, plot_path, fig_title, width, height) {
 }
 
 # Define the function to create a boxplot for a given biomarker
-create_biomarker_boxplot <- function(df, biomarker, response_col = "Response", fill_colors = c("R" = "#0072B2", "NR" = "#F0E442")) {
+create_biomarker_boxplot <- function(df, biomarkers, response_col = "Response", fill_colors = c("R" = "#009E73", "NR" = "#D55E00")) {
+  # Check if df is a data frame
+  if (!is.data.frame(df)) {
+    stop("The input data (df) should be a data frame.")
+  }
+
+  # Check if biomarkers is a character vector
+  if (!is.character(biomarkers)) {
+    stop("The biomarkers argument should be a character vector.")
+  }
+
+  # Check if all biomarkers exist in the data frame
+  missing_biomarkers <- setdiff(biomarkers, colnames(df))
+  if (length(missing_biomarkers) > 0) {
+    stop("The following biomarkers are not found in the data frame: ", paste(missing_biomarkers, collapse = ", "))
+  }
+
+  # Normalize the biomarker values
+  df[biomarkers] <- lapply(df[biomarkers], function(x) (x - min(x)) / (max(x) - min(x)))
+  
+  # Pivot the data longer for all biomarkers
   long_data <- df %>%
-    pivot_longer(cols = c(biomarker), 
+    pivot_longer(cols = all_of(biomarkers), 
                  names_to = "Measurement", values_to = "Value")
   
+  # Create the boxplot
   p <- ggplot(long_data, aes(x = Measurement, y = Value, fill = !!sym(response_col))) +
     geom_boxplot() +
     scale_fill_manual(values = fill_colors) +
-    labs(x = "Measurement", y = "Value", title = paste("Boxplot of", biomarker, "Faceted by Response")) +
+    labs(x = "Measurement", y = "Normalized Value", title = "Boxplots for Biomarkers") +
     theme_minimal() +
     theme(axis.text.x = element_text(angle = 0, hjust = 1))
   
   # Add p-values to the plot
-  p + stat_compare_means(aes(group = !!sym(response_col)), method = "t.test", label = "p.signif")
+  p + stat_compare_means(aes(group = !!sym(response_col)), method = "wilcox.test", label = "p.format")
+}
+
+# Define the function to create a boxplot for proteasome biomarkers
+create_proteas_boxplot <- function(df, biomarkers, response_col = "Response", fill_colors = c("R" = "#009E73", "NR" = "#D55E00")) {
+  # Check if df is a data frame
+  if (!is.data.frame(df)) {
+    stop("The input data (df) should be a data frame.")
+  }
+  
+  # Check if biomarkers is a character vector
+  if (!is.character(biomarkers)) {
+    stop("The biomarkers argument should be a character vector.")
+  }
+  
+  # Check if all biomarkers exist in the data frame
+  missing_biomarkers <- setdiff(biomarkers, colnames(df))
+  if (length(missing_biomarkers) > 0) {
+    stop("The following biomarkers are not found in the data frame: ", paste(missing_biomarkers, collapse = ", "))
+  }
+  
+  # Normalize the biomarker values
+  df[biomarkers] <- lapply(df[biomarkers], function(x) (x - min(x)) / (max(x) - min(x)))
+  
+  # Pivot the data longer for all biomarkers
+  long_data <- df %>%
+    pivot_longer(cols = all_of(biomarkers), 
+                 names_to = "Measurement", values_to = "Value")
+  
+  # Set the order of the Measurement factor
+  long_data$Measurement <- factor(long_data$Measurement, levels = biomarkers)
+  
+  # Create the boxplot
+  p <- ggplot(long_data, aes(x = Measurement, y = Value, fill = !!sym(response_col))) +
+    geom_boxplot() +
+    scale_fill_manual(values = c(R = "#009E73", NR = "#D55E00"),
+                      labels = c("R" = "Responders", "NR" = "Non-responders")) +
+    labs(x = "Biomarker", y = "Expression level (normalized)", title = NULL) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 0, hjust = 1),
+          panel.grid.minor = element_blank(),
+          panel.background = element_rect(fill = "white", colour = "black"),
+          plot.background = element_rect(fill = "white", colour = NA))
+  
+  # Add p-values to the plot
+  p + stat_compare_means(aes(group = !!sym(response_col)), method = "wilcox.test", label = "p.format", vjust = -1)
 }
 
 # Define biomarkers clustering order
@@ -1241,7 +1256,7 @@ biomarkers_clustering_order <- function(df, biomarkers, measure = "median", resp
   
   # Combine the categorical numeric columns into a matrix for clustering
   binary_matrix <- as.matrix(df_for_clustering %>%
-                               select(ends_with("_Category")))
+                               dplyr::select(ends_with("_Category")))
   
   # Perform hierarchical clustering on the combined binary matrix
   dist_matrix <- dist(binary_matrix)
@@ -1450,22 +1465,30 @@ pheatmap_biomarkers <- function(df, numerical_biomarkers, categorical_biomarkers
   df$SampleID <- NULL
   
   # Separate numerical and categorical data
-  numeric_data <- df %>% select(one_of(numerical_biomarkers))
-  ann_df <- df %>% select(!!sym(response_col), one_of(categorical_biomarkers))
+  numeric_data <- df %>% dplyr::select(one_of(numerical_biomarkers))
+  ann_df <- df %>% dplyr::select(!!sym(response_col), one_of(categorical_biomarkers))
   ann_df$SampleID <- rownames(ann_df)
   
   # Get ubi data
   if (ubi_counts) {
-    ubi_data <- df %>% select("ubi_counts", "deubi_counts")
+    ubi_data <- df %>% dplyr::select("ubi_counts", "deubi_counts")
   } else {
-    ubi_data <- df %>% select("ubi_lof", "deubi_lof")
+    ubi_data <- df %>% dplyr::select("ubi_lof", "deubi_lof")
   }
   
   # Merge
   ann_df <- bind_cols(ann_df, ubi_data)
   
   # Normalize numerical data
-  normalized_data <- as.data.frame(lapply(numeric_data, function(x) (x - min(x)) / (max(x) - min(x))))
+  normalized_data <- as.data.frame(lapply(numeric_data, function(x) {
+    if (all(is.na(x))) {
+      return(rep(NA, length(x)))
+    } else if (min(x, na.rm = TRUE) == max(x, na.rm = TRUE)) {
+      return(rep(0.5, length(x)))  # Arbitrary constant for no variance columns
+    } else {
+      return((x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE)))
+    }
+  }))
   normalized_data$SampleID <- rownames(numeric_data)
   
   # Melt the normalized data for ggplot
@@ -1479,18 +1502,22 @@ pheatmap_biomarkers <- function(df, numerical_biomarkers, categorical_biomarkers
   
   if (response_col == "resp_3_cat") {
     ann_df <- ann_df %>% 
-      rename(Response = resp_3_cat)
+      dplyr::rename(Response = resp_3_cat) %>% 
+      dplyr::mutate(Response = recode(Response, "R" = "Responders", "SD" = "Stable Disease", "NR" = "Non-responders"))
+  } else {
+    ann_df <- ann_df %>% 
+      dplyr::mutate(Response = recode(Response, "R" = "Responders", "NR" = "Non-responders"))
   }
   
   if (!ubi_counts) {
     ann_df <- ann_df %>% 
-      rename(Ubiquitin_LoF = ubi_lof,
+      dplyr::rename(Ubiquitin_LoF = ubi_lof,
              Deubiquitin_LoF = deubi_lof) %>% 
-      mutate(Ubiquitin_LoF = as.factor(as.character(Ubiquitin_LoF)),
+      dplyr::mutate(Ubiquitin_LoF = as.factor(as.character(Ubiquitin_LoF)),
              Deubiquitin_LoF = as.factor(as.character(Deubiquitin_LoF)))
   } else {
     ann_df <- ann_df %>% 
-      rename(Ubiquitin_LoF_counts = ubi_counts,
+      dplyr::rename(Ubiquitin_LoF_counts = ubi_counts,
              Deubiquitin_LoF_counts = deubi_counts)
   }
   
@@ -1504,17 +1531,17 @@ pheatmap_biomarkers <- function(df, numerical_biomarkers, categorical_biomarkers
   
   # Conditionally add the Response colors
   if (response_col == "Response") {
-    ann_colors$Response <- c(R = "#009E73", NR = "#D55E00")
+    ann_colors$Response <- c("Responders" = "#009E73", "Non-responders" = "#D55E00")
   } else if (response_col == "resp_3_cat") {
-    ann_colors$Response <- c(R = "#009E73", SD = "#8A2BE2", NR = "#D55E00")
+    ann_colors$Response <- c("Responders" = "#009E73", "Stable Disease" = "#8A2BE2", "Non-responders" = "#D55E00")
   }
   
   # Conditionally add the ubiquitin info
-  gradient_ubi <- colorRampPalette(c("white", "#FFD700"))(100)
-  gradient_deubi <- colorRampPalette(c("white", "#0072B2"))(100)
+  gradient_ubi <- colorRampPalette(c("white", "#E69F00"))(100)
+  gradient_deubi <- colorRampPalette(c("white", "#CC79A7"))(100)
   if (!ubi_counts) {
-    ann_colors$Ubiquitin_LoF <- c(`1` = "#FFD700", `0` = "white")
-    ann_colors$Deubiquitin_LoF <- c(`1` = "#0072B2", `0` = "white")
+    ann_colors$Ubiquitin_LoF <- c(`1` = "#E69F00", `0` = "white")
+    ann_colors$Deubiquitin_LoF <- c(`1` = "#CC79A7", `0` = "white")
   } else {
     ann_colors$Ubiquitin_LoF_counts <- gradient_ubi
     ann_colors$Deubiquitin_LoF_counts <- gradient_deubi
@@ -1529,28 +1556,31 @@ pheatmap_biomarkers <- function(df, numerical_biomarkers, categorical_biomarkers
   df.fin.t <- t(df.fin)
   
   if (!split_response){
-    p <- pheatmap(df.fin.t, 
-             cluster_rows = FALSE, 
-             cluster_cols = TRUE, 
-             annotation_col = ann_df, 
-             annotation_colors = ann_colors,
-             show_rownames = TRUE, 
-             show_colnames = TRUE,
-             scale = "none", 
-             border_color = "black",
-             # legend_breaks = c(0, 0.5, 1, max(df.fin.t)),
-             # legend_labels = c("0", "0.5", "1", "title\n"),
-             angle_col = "45",
-             legend_breaks = c(0, 1),
-             legend_labels = c("Low", "High"),
-             color = colorRampPalette(c("#F0E442", "#0072B2"))(50))
+    p <- pheatmap::pheatmap(df.fin.t, 
+                     cluster_rows = FALSE, 
+                     cluster_cols = TRUE, 
+                     annotation_col = ann_df, 
+                     annotation_colors = ann_colors,
+                     show_rownames = TRUE, 
+                     show_colnames = TRUE,
+                     scale = "none", 
+                     border_color = "black",
+                     angle_col = "45",
+                     legend_breaks = c(0, 1),
+                     legend_labels = c("Low", "High"),
+                     display_numbers = T,
+                     number_color = "black",
+                     fontsize_number = 12,
+                     color = colorRampPalette(c("#F0E442", "#0072B2"))(50)) %>% as.ggplot() +
+      coord_cartesian(clip = "off")
     return(p)
   } else if (response_col == "Response") {
-    p.r <- pheatmap(df.fin.t %>% as.data.frame() %>% dplyr::select(all_of(ann_df %>% dplyr::filter(Response=="R") %>% rownames())) %>% as.matrix(), 
+    p.r <- pheatmap::pheatmap(df.fin.t %>% as.data.frame() %>% dplyr::select(all_of(ann_df %>% dplyr::filter(Response=="Responders") %>% rownames())) %>% as.matrix(), 
                   cluster_rows = FALSE, 
                   cluster_cols = TRUE, 
-                  annotation_col = ann_df %>% dplyr::filter(Response=="R"), 
+                  annotation_col = ann_df %>% dplyr::filter(Response=="Responders"), 
                   annotation_colors = ann_colors,
+                  annotation_legend = FALSE,
                   show_rownames = TRUE, 
                   show_colnames = TRUE,
                   scale = "none", 
@@ -1558,12 +1588,17 @@ pheatmap_biomarkers <- function(df, numerical_biomarkers, categorical_biomarkers
                   angle_col = "45",
                   legend_breaks = c(0, 1),
                   legend_labels = c("Low", "High"),
-                  color = colorRampPalette(c("#F0E442", "#0072B2"))(50)) %>% as.ggplot()
+                  display_numbers = T,
+                  number_color = "black",
+                  fontsize_number = 12,
+                  color = colorRampPalette(c("#F0E442", "#0072B2"))(50),
+                  legend = FALSE) %>% as.ggplot() +
+      coord_cartesian(clip = "off")
     
-    p.nr <- pheatmap(df.fin.t %>% as.data.frame()%>% dplyr::select(all_of(ann_df %>% dplyr::filter(Response=="NR") %>% rownames())) %>% as.matrix(), 
+    p.nr <- pheatmap::pheatmap(df.fin.t %>% as.data.frame()%>% dplyr::select(all_of(ann_df %>% dplyr::filter(Response=="Non-responders") %>% rownames())) %>% as.matrix(), 
                      cluster_rows = FALSE, 
                      cluster_cols = TRUE, 
-                     annotation_col = ann_df %>% dplyr::filter(Response=="NR"), 
+                     annotation_col = ann_df %>% dplyr::filter(Response=="Non-responders"), 
                      annotation_colors = ann_colors,
                      show_rownames = TRUE, 
                      show_colnames = TRUE,
@@ -1572,41 +1607,58 @@ pheatmap_biomarkers <- function(df, numerical_biomarkers, categorical_biomarkers
                      angle_col = "45",
                      legend_breaks = c(0, 1),
                      legend_labels = c("Low", "High"),
-                     color = colorRampPalette(c("#F0E442", "#0072B2"))(50)) %>% as.ggplot()
-    return(p.r +  p.nr)
+                     display_numbers = T,
+                     number_color = "black",
+                     fontsize_number = 12,
+                     color = colorRampPalette(c("#F0E442", "#0072B2"))(50)) %>% as.ggplot() +
+      coord_cartesian(clip = "off")
+    combined_plot <- p.r + plot_spacer() + p.nr + plot_layout(widths = c(0.9, 0, 1.2))  # Adjust the widths as needed
+    return(combined_plot)
   } else {
-    p.r <- pheatmap(df.fin.t %>% as.data.frame() %>% dplyr::select(all_of(ann_df %>% dplyr::filter(Response=="R") %>% rownames())) %>% as.matrix(), 
-                    cluster_rows = FALSE, 
-                    cluster_cols = TRUE, 
-                    annotation_col = ann_df %>% dplyr::filter(Response=="R"), 
-                    annotation_colors = ann_colors,
-                    show_rownames = TRUE, 
-                    show_colnames = TRUE,
-                    scale = "none", 
-                    border_color = "black",
-                    angle_col = "45",
-                    legend_breaks = c(0, 1),
-                    legend_labels = c("Low", "High"),
-                    color = colorRampPalette(c("#F0E442", "#0072B2"))(50)) %>% as.ggplot()
+    p.r <- pheatmap::pheatmap(df.fin.t %>% as.data.frame() %>% dplyr::select(all_of(ann_df %>% dplyr::filter(Response=="Responders") %>% rownames())) %>% as.matrix(), 
+                  cluster_rows = FALSE, 
+                  cluster_cols = TRUE, 
+                  annotation_col = ann_df %>% dplyr::filter(Response=="Responders"), 
+                  annotation_colors = ann_colors,
+                  annotation_legend = FALSE,
+                  show_rownames = TRUE, 
+                  show_colnames = TRUE,
+                  scale = "none", 
+                  border_color = "black",
+                  angle_col = "45",
+                  legend_breaks = c(0, 1),
+                  legend_labels = c("Low", "High"),
+                  display_numbers = T,
+                  number_color = "black",
+                  fontsize_number = 12,
+                  color = colorRampPalette(c("#F0E442", "#0072B2"))(50),
+                  legend = FALSE) %>% as.ggplot() +
+      coord_cartesian(clip = "off")
     
-    p.sd <- pheatmap(df.fin.t %>% as.data.frame() %>% dplyr::select(all_of(ann_df %>% dplyr::filter(Response=="SD") %>% rownames())) %>% as.matrix(), 
-                    cluster_rows = FALSE, 
-                    cluster_cols = TRUE, 
-                    annotation_col = ann_df %>% dplyr::filter(Response=="SD"), 
-                    annotation_colors = ann_colors,
-                    show_rownames = TRUE, 
-                    show_colnames = TRUE,
-                    scale = "none", 
-                    border_color = "black",
-                    angle_col = "45",
-                    legend_breaks = c(0, 1),
-                    legend_labels = c("Low", "High"),
-                    color = colorRampPalette(c("#F0E442", "#0072B2"))(50)) %>% as.ggplot()
+    p.sd <- pheatmap::pheatmap(df.fin.t %>% as.data.frame() %>% dplyr::select(all_of(ann_df %>% dplyr::filter(Response=="Stable Disease") %>% rownames())) %>% as.matrix(), 
+                  cluster_rows = FALSE, 
+                  cluster_cols = TRUE, 
+                  annotation_col = ann_df %>% dplyr::filter(Response=="Stable Disease"), 
+                  annotation_colors = ann_colors,
+                  annotation_legend = FALSE,
+                  show_rownames = TRUE, 
+                  show_colnames = TRUE,
+                  scale = "none", 
+                  border_color = "black",
+                  angle_col = "45",
+                  legend_breaks = c(0, 1),
+                  legend_labels = c("Low", "High"),
+                  display_numbers = T,
+                  number_color = "black",
+                  fontsize_number = 12,
+                  color = colorRampPalette(c("#F0E442", "#0072B2"))(50),
+                  legend = FALSE) %>% as.ggplot() +
+      coord_cartesian(clip = "off")
     
-    p.nr <- pheatmap(df.fin.t %>% as.data.frame()%>% dplyr::select(all_of(ann_df %>% dplyr::filter(Response=="NR") %>% rownames())) %>% as.matrix(), 
+    p.nr <- pheatmap::pheatmap(df.fin.t %>% as.data.frame()%>% dplyr::select(all_of(ann_df %>% dplyr::filter(Response=="Non-responders") %>% rownames())) %>% as.matrix(), 
                      cluster_rows = FALSE, 
                      cluster_cols = TRUE, 
-                     annotation_col = ann_df %>% dplyr::filter(Response=="NR"), 
+                     annotation_col = ann_df %>% dplyr::filter(Response=="Non-responders"), 
                      annotation_colors = ann_colors,
                      show_rownames = TRUE, 
                      show_colnames = TRUE,
@@ -1615,15 +1667,15 @@ pheatmap_biomarkers <- function(df, numerical_biomarkers, categorical_biomarkers
                      angle_col = "45",
                      legend_breaks = c(0, 1),
                      legend_labels = c("Low", "High"),
-                     color = colorRampPalette(c("#F0E442", "#0072B2"))(50)) %>% as.ggplot()
-    return(p.r +  p.sd + p.nr)
+                     display_numbers = T,
+                     number_color = "black",
+                     fontsize_number = 12,
+                     color = colorRampPalette(c("#F0E442", "#0072B2"))(50)) %>% as.ggplot() +
+      coord_cartesian(clip = "off")
+    combined_plot <- p.r + plot_spacer() + p.sd + plot_spacer() + p.nr + plot_layout(widths = c(0.9, 0, 0.9, 0, 1.2))  # Adjust the widths as needed
+    return(combined_plot)
   }
 }
-
-library(ComplexHeatmap)
-library(circlize)
-library(dplyr)
-library(tidyr)
 
 # Function to make a tile plot using ComplexHeatmap for biomarkers
 complex_heatmap_biomarkers <- function(df, numerical_biomarkers, categorical_biomarkers, response_col, ubi_counts = FALSE, split_response = FALSE){
@@ -1633,15 +1685,15 @@ complex_heatmap_biomarkers <- function(df, numerical_biomarkers, categorical_bio
   df$SampleID <- NULL
   
   # Separate numerical and categorical data
-  numeric_data <- df %>% select(one_of(numerical_biomarkers))
-  categorical_data <- df %>% select(!!sym(response_col), one_of(categorical_biomarkers))
+  numeric_data <- df %>% dplyr::select(one_of(numerical_biomarkers))
+  categorical_data <- df %>% dplyr::select(!!sym(response_col), one_of(categorical_biomarkers))
   categorical_data$SampleID <- rownames(categorical_data)
   
   # Get ubi data
   if (ubi_counts) {
-    ubi_data <- df %>% select("ubi_counts", "deubi_counts")
+    ubi_data <- df %>% dplyr::select("ubi_counts", "deubi_counts")
   } else {
-    ubi_data <- df %>% select("ubi_lof", "deubi_lof")
+    ubi_data <- df %>% dplyr::select("ubi_lof", "deubi_lof")
   }
   
   # Normalize numerical data

@@ -21,17 +21,10 @@ output:
 This document is to analyse the PFAM of the ubiquitin-related genes that have any LoF mutation among all samples and see if there is a pattern that distinguishes responders from non-responders.
 
 ```{r, message=FALSE}
-### Load required libraries
-library(readxl)
-library(tidyverse)
-library(purrr)
-library(dplyr)
-library(knitr)
-library(DT)
-library(jsonlite)
-
-### Load functions
+### Load packages, functions and paths
+source(file = "../01_install.R")
 source(file = "../02_functions.R")
+source(file = "../03_paths.R")
 
 ### Define paths
 current_dir <- getwd()
@@ -41,7 +34,7 @@ results_pc_path <- file.path(current_dir,
                               "../../results/patient_characteristics/output")
 results_fip_path <- file.path(current_dir,
                               "../../results/somatic_mutation_analysis/functional_impact_prediction/output")
-results_ubgenesets_path <- file.path(current_dir, 
+results_ubi_db_path <- file.path(current_dir, 
                                  "../../results/somatic_mutation_analysis/ubiquitin_custom_GS/output")
 results_ubfora_path <- file.path(current_dir, 
                                  "../../results/somatic_mutation_analysis/ubiquitin_fora/output")
@@ -73,7 +66,18 @@ patients_ub_prot_lof_mut_df <- read.csv(patients_ub_prot_lof_mut_path, header = 
 
 # Extract only Ensembl Gene and Prot IDs
 gene2prot_df <- patients_ub_prot_lof_mut_df %>% 
-  dplyr::select(ensembl_id, p_ensembl_id)
+  dplyr::select(sample_id, ensembl_id, p_ensembl_id)
+
+# Response info
+sup1_response_path <- file.path(results_pc_path, 
+                           "sup1_response.csv")
+sup1_response_df <- read.csv(sup1_response_path)[ , -1] # Drop first column
+
+# df to merge response info later
+response_df <- sup1_response_df %>% 
+  dplyr::rename(sample_id = Sample.ID,
+                patient_response = Patient.Response) %>% 
+  dplyr::select(sample_id, patient_response)
 
 # Source info
 unique_shared_genes_path <- file.path(results_ubfora_path, 
@@ -108,29 +112,50 @@ all_pfam_path <- file.path(results_pfam_path,
 
 pfam_df <- readRDS(all_pfam_path)
 
-# filtered_family_pfam_df <- pfam_df %>% 
-#   dplyr::group_by(Protein_accession) %>% 
-#   dplyr::filter(signature.entry.type == "FAMILY")
-
 # Filter by DB and domain
-filtered_domain_pfam_df <- pfam_df %>% 
-  dplyr::group_by(Protein_accession) %>% 
-  dplyr::filter(signature.signatureLibraryRelease.library == "PFAM", 
+filtered_domain_pfam_df <- pfam_df %>%
+  dplyr::group_by(Protein_accession) %>%
+  dplyr::filter(signature.signatureLibraryRelease.library == "PFAM",
                 signature.entry.type == "DOMAIN")
 
-# filtered_family_pfam_df <- pfam_df %>% 
-#   dplyr::group_by(Protein_accession) %>% 
-#   dplyr::filter(signature.entry.type == "FAMILY")
+# Filter by family
+filtered_family_pfam_df <- pfam_df %>%
+  dplyr::group_by(Protein_accession) %>%
+  dplyr::filter(signature.entry.type == "FAMILY")
+
+# # Manually change related families (child fam --> parent fam/superfam)
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR003977"] <- "IPR031127"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR045093"] <- "IPR036317"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR033010"] <- "IPR015943"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR017096"] <- "IPR015915"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR050164"] <- "IPR038765"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR014764"] <- "IPR042460"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR047144"] <- "IPR038227"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR050185"] <- "IPR038765"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR045886"] <- "IPR035985"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR018075"] <- "IPR038252"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR000011"] <- "IPR035985"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR044635"] <- "IPR038765"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR033509"] <- "IPR037197"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR023237"] <- "IPR023235"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR039398"] <- "IPR039399"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR050648"] <- "IPR032675"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR051210"] <- "IPR009091"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR051550"] <- "IPR011050"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR051709"] <- "IPR009091"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR030661"] <- "IPR035985"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR039852"] <- "IPR016024"
+# filtered_family_pfam_df$signature.entry.accession[filtered_family_pfam_df$signature.entry.accession == "IPR045151"] <- "IPR036322"
 
 # Rename and select cols of interest
-short_domain_pfam_df <- filtered_domain_pfam_df %>% 
+short_domain_pfam_df <- filtered_family_pfam_df %>% 
   dplyr::rename(p_ensembl_id = Protein_accession,
                 dom_name = signature.entry.name,
                 dom_desc = signature.entry.description) %>% 
   dplyr::select(p_ensembl_id, dom_name, dom_desc)
 
 # Standardize domain names
-standard_dom_pfam_df <- short_domain_pfam_df %>% 
+standard_dom_pfam_df <- short_domain_pfam_df %>%
   mutate(dom_name = case_when(
     str_detect(dom_name, "E1") | str_detect(dom_desc, "E1") ~ "Ub-activating_E1",
     str_detect(dom_name, "E2") | str_detect(dom_desc, "E2") ~ "Ub-conjugting_E2",
@@ -151,27 +176,239 @@ gene2pfam_df <- standard_dom_pfam_df %>%
 
 combined_df <- gene2pfam_df %>% 
   dplyr::left_join(gene2source_df, by = "ensembl_id") %>% 
-  dplyr::select(corrected_hugo_symbol, dom_name, source) %>% 
-  dplyr::distinct()
+  dplyr::select(sample_id, corrected_hugo_symbol, dom_name, source) %>% 
+  dplyr::distinct() %>% 
+  tidyr::drop_na()
 
+# Remove p_ensembl_id col
 combined_df <- combined_df[, !names(combined_df) %in% "p_ensembl_id"]
+
+# Merge response info
+final_pfam_df <- combined_df %>% 
+  dplyr::left_join(response_df)
 ```
 
 I grouped some PFAM predicted domains manually because they had slightly different names but performed the same function.
 
-# Clustering based on PFAM: Heat map
+<!-- # Clustering based on PFAM: Heat map -->
 
-## R, NR and shared Heat map
+<!-- ## R, NR and shared Heat map -->
 
-```{r, message=FALSE, warning=FALSE, fig.width=20, fig.height=20}
-plot_path <- file.path(figures_pfam_path, "pfam_tile_R_NR_shared.png")
-tile_plot_pfam(combined_df, plot_path, "Tile plot of PFAM classification of ub genes", 15, 15)
+<!-- ```{r, message=FALSE, warning=FALSE, fig.width=20, fig.height=20} -->
+<!-- plot_path <- file.path(figures_pfam_path, "pfam_tile_R_NR_shared.png") -->
+<!-- plot <- tile_plot_pfam(combined_df, plot_path, NULL, 15, 15) -->
+<!-- print(plot) -->
+<!-- ggsave(plot_path, plot, height = 20, width = 20, dpi = 300) -->
+<!-- ``` -->
+
+# Barplot of PFAM
+
+```{r, fig.height=10, fig.width=14}
+# Fig12
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggpubr)
+
+# Count occurrences of each dom_name per sample_id
+counts_df <- final_pfam_df %>%
+  group_by(sample_id, dom_name) %>%
+  summarise(count = n(), .groups = 'drop')
+
+# Summarize by patient_response
+summary_df <- counts_df %>%
+  left_join(final_pfam_df %>% dplyr::select(sample_id, patient_response) %>% distinct(), by = "sample_id") %>%
+  group_by(patient_response, dom_name) %>%
+  summarise(
+    total_count = sum(count),
+    std_dev = sd(count),
+    .groups = 'drop'
+  )
+
+# Calculate p-values using Wilcoxon test
+wilcox_results <- counts_df %>%
+  left_join(final_pfam_df %>% dplyr::select(sample_id, patient_response) %>% distinct(), by = "sample_id") %>%
+  group_by(dom_name) %>%
+  summarise(
+    p_value = if (n_distinct(patient_response) == 2) 
+                wilcox.test(count ~ patient_response)$p.value 
+              else NA,
+    .groups = 'drop'
+  ) %>%
+  mutate(p_value = ifelse(is.nan(p_value), NA, p_value))
+
+# Combine summary statistics and p-values
+final_stats <- summary_df %>%
+  left_join(wilcox_results, by = "dom_name") %>% 
+  mutate(p_value_label = case_when(
+    is.na(p_value) ~ NA_character_,
+    TRUE ~ paste0("p=", format(p_value, digits = 2))
+  ))
+
+# Calculate the maximum count to set the y-axis limit dynamically
+max_count <- max(final_stats$total_count, na.rm = TRUE)
+buffer <- max_count * 0.1 # Add 10% buffer to the maximum count for the labels
+
+# Plotting
+plot <- ggplot(final_stats, aes(x = dom_name, y = total_count, fill = patient_response)) +
+  geom_bar(stat = "identity", position = position_dodge(), width = 0.8) +
+  geom_errorbar(aes(ymin = total_count - std_dev, ymax = total_count + std_dev), 
+                position = position_dodge(0.8), width = 0.25) +
+  scale_fill_manual(values = c("R" = "#009E73", "NR" = "#D55E00"),
+                    labels = c("R" = "Responders", "NR" = "Non-responders")) +
+  labs(title = NULL,
+       x = "PFAM family",
+       y = "Protein counts",
+       fill = "Patient Response") +
+  ylim(0, max_count + buffer) + # Adjust the y-axis to include the buffer
+  theme_minimal() +
+  theme(
+      panel.grid.major = element_line(color = "lightgrey", linewidth = 0.5),
+      panel.grid.minor = element_blank(),
+      panel.background = element_rect(fill = "white", colour = "black"),
+      plot.background = element_rect(fill = "white", colour = NA),
+      axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +  # Rotate X-axis labels for better readability
+  scale_y_continuous(breaks = seq(0, max_count + 25, by = 5),  # Ticks every 5 units
+                     minor_breaks = seq(0, max_count + 25, by = 1))  # Minor ticks every 1 unit
+
+# Add the p-value text labels
+plot <- plot + geom_text(data = final_stats, aes(x = dom_name, y = max_count + buffer / 2, label = p_value_label), 
+                         vjust = -2.5, hjust = 0.5, size = 4, color = "black")
+
+# plot <- plot + stat_compare_means(aes(group = dom_name), method = "wilcox.test", label = "p.format", vjust = 0,                                   ref.group = ".all.", label.y = 195)
+plot_path <- file.path(figures_pfam_path, "pfam_barplot.png")
+ggsave(plot_path, plot, width = 14, height = 10, dpi = 300)
+print(plot)
 ```
 
-```{r, message=FALSE, warning=FALSE, fig.width=20, fig.height=20}
-plot_path <- file.path(figures_pfam_path, "pfam_clustering_R_NR_shared.png")
-clustering_pfam(combined_df, plot_path, "Clustering of PFAM classification of ub genes", 15, 15)
+```{r, message=FALSE, warning=FALSE, fig.width=18, fig.height=8}
+# Calculate the counts
+grouped_counts <- combined_df %>%
+  group_by(dom_name, source) %>%
+  summarise(count = n(), .groups = 'drop') %>% 
+  tidyr::complete(dom_name, source, fill = list(count = 0)) %>%
+  arrange(dom_name, source) %>% 
+  dplyr::distinct()
+
+# Calculate the maximum count to set the y-axis limit dynamically
+max_count <- max(grouped_counts$count, na.rm = TRUE)
+buffer <- max_count * 0.1 # Add 10% buffer to the maximum count for the labels
+
+# Create the bar plot with error bars and p-values
+plot <- ggplot(grouped_counts, aes(x = dom_name, y = count, fill = source)) +
+  geom_bar(stat = "identity", position = position_dodge(), width = 0.8) +  # dodge position to place bars side by side
+  geom_text(aes(label = count), vjust = -0.5, position = position_dodge(0.9)) +  # Exclude "0" labels
+  scale_fill_manual(values = c("R" = "#009E73", "NR" = "#D55E00", "Shared" = "#CC79A7"),
+                    labels = c("R" = "Responsers", "NR" = "Non-responders", "Shared" = "Shared")) +
+  labs(title = NULL,
+       x = "PFAM family",
+       y = "Gene counts",
+       fill = "Response Group") +
+  ylim(0, max_count + buffer) + # Adjust the y-axis to include the buffer
+  theme_minimal() +
+  theme(
+      panel.grid.major = element_line(color = "lightgrey", linewidth = 0.5),
+      panel.grid.minor = element_blank(),
+      panel.background = element_rect(fill = "white", colour = "black"),
+      plot.background = element_rect(fill = "white", colour = NA),
+      axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +  # Rotate X-axis labels for better readability
+  scale_y_continuous(breaks = seq(0, max_count, by = 5),  # Ticks every 5 units
+                     minor_breaks = seq(0, max_count, by = 1))  # Minor ticks every 1 unit
+
+plot <- plot + stat_compare_means(aes(group = dom_name), method = "wilcox.test", label = "p.format", vjust = -2)
+
+plot_path <- file.path(figures_pfam_path, "barplot_R_NR_shared_pfam.png")
+ggsave(plot_path, plot, width = 12, height = 10, dpi = 300)
+
+# Print the plot
+print(plot)
 ```
+
+<!-- ```{r} -->
+<!-- library(dplyr) -->
+<!-- library(tidyr) -->
+<!-- library(ggplot2) -->
+<!-- library(ggpubr) -->
+
+<!-- # Sample data frame (replace with your actual data) -->
+<!-- # combined_df <- your_data_frame_here -->
+
+<!-- # Calculate the counts -->
+<!-- grouped_counts <- combined_df %>% -->
+<!--   group_by(dom_name, source) %>% -->
+<!--   summarise(count = n(), .groups = 'drop') %>%  -->
+<!--   tidyr::complete(dom_name, source, fill = list(count = 0)) %>% -->
+<!--   arrange(dom_name, source) %>%  -->
+<!--   dplyr::distinct() -->
+
+<!-- # Perform Kruskal-Wallis test for each dom_name -->
+<!-- kruskal_results <- grouped_counts %>% -->
+<!--   group_by(dom_name) %>% -->
+<!--   summarise( -->
+<!--     p_value = if (n_distinct(source) > 1) kruskal.test(count ~ source)$p.value else NA, -->
+<!--     .groups = 'drop' -->
+<!--   ) -->
+
+<!-- # If needed, perform pairwise Wilcoxon tests with p-value adjustment -->
+<!-- pairwise_results <- grouped_counts %>% -->
+<!--   dplyr::group_by(dom_name) %>% -->
+<!--   do({ -->
+<!--     data = . -->
+<!--     if (n_distinct(data$source) > 1) { -->
+<!--       rstatix::pairwise_wilcox_test(data$count, data$source, p.adjust.method = "BH") %>% -->
+<!--         .$p.value %>% -->
+<!--         as.data.frame() %>% -->
+<!--         dplyr::rename(p_value = V1) %>% -->
+<!--         dplyr::mutate(test = rownames(.)) -->
+<!--     } else { -->
+<!--       data.frame(p_value = NA, test = NA) -->
+<!--     } -->
+<!--   }) %>% -->
+<!--   dplyr::filter(!is.na(test)) -->
+
+<!-- # Combine counts with Kruskal-Wallis p-values -->
+<!-- stats_table <- grouped_counts %>% -->
+<!--   left_join(kruskal_results, by = "dom_name") %>% -->
+<!--   pivot_wider(names_from = source, values_from = count, values_fill = list(count = 0)) %>% -->
+<!--   rename(kruskal_p_value = p_value) -->
+
+<!-- # Print the statistics table -->
+<!-- print(stats_table) -->
+
+<!-- # Save the table to a CSV file -->
+<!-- # write.csv(stats_table, file.path(results_pfam_path, "pfam_stats_table.csv"), row.names = FALSE) -->
+
+<!-- # Plotting -->
+<!-- max_count <- max(grouped_counts$count, na.rm = TRUE) -->
+<!-- buffer <- max_count * 0.1  # Add 10% buffer to the maximum count for the labels -->
+
+<!-- plot <- ggplot(grouped_counts, aes(x = dom_name, y = count, fill = source)) + -->
+<!--   geom_bar(stat = "identity", position = position_dodge(), width = 0.8) +  # dodge position to place bars side by side -->
+<!--   geom_text(aes(label = count), vjust = -0.5, position = position_dodge(0.9)) +  # Exclude "0" labels -->
+<!--   scale_fill_manual(values = c("R" = "#009E73", "NR" = "#D55E00", "Shared" = "#CC79A7"), -->
+<!--                     labels = c("R" = "Responders", "NR" = "Non-responders", "Shared" = "Shared")) + -->
+<!--   labs(title = NULL, -->
+<!--        x = "PFAM family", -->
+<!--        y = "Gene counts", -->
+<!--        fill = "Response Group") + -->
+<!--   ylim(0, max_count + buffer) +  # Adjust the y-axis to include the buffer -->
+<!--   theme_minimal() + -->
+<!--   theme( -->
+<!--       panel.grid.major = element_line(color = "lightgrey", linewidth = 0.5), -->
+<!--       panel.grid.minor = element_blank(), -->
+<!--       panel.background = element_rect(fill = "white", colour = "black"), -->
+<!--       plot.background = element_rect(fill = "white", colour = NA), -->
+<!--       axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +  # Rotate X-axis labels for better readability -->
+<!--   scale_y_continuous(breaks = seq(0, max_count, by = 5),  # Ticks every 5 units -->
+<!--                      minor_breaks = seq(0, max_count, by = 1)) +  # Minor ticks every 1 unit -->
+<!--   stat_compare_means(aes(group = source), method = "kruskal.test", label = "p.format", vjust = -2) -->
+
+<!-- # plot_path <- file.path(figures_pfam_path, "barplot_R_NR_shared_pfam.png") -->
+<!-- # ggsave(plot_path, plot, width = 12, height = 10, dpi = 300) -->
+
+<!-- print(plot) -->
+<!-- ``` -->
 
 # Session Info
 

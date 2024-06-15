@@ -17,41 +17,10 @@ output:
 ---
 
 ```{r, message=FALSE}
-### Load required libraries
-library(readxl)
-library(tidyverse)
-library(dplyr)
-library(knitr)
-library(DT)
-library(ggplot2)
-library(patchwork)
-library(ggpubr)
-
-### Load functions
+### Load packages, functions and paths
+source(file = "../01_install.R")
 source(file = "../02_functions.R")
-
-### Define paths
-current_dir <- getwd()
-
-data_path <- file.path(current_dir,
-                       "../../data/_raw")
-
-# Results
-results_pc_path <- file.path(current_dir,
-                              "../../results/patient_characteristics/output")
-
-# Create the folder if it does not exist
-if(!file.exists(results_pc_path)) {
-  dir.create(results_pc_path, recursive = TRUE)
-}
-
-figures_pc_path <- file.path(current_dir,
-                              "../../results/patient_characteristics/figures")
-
-# Create the folder if it does not exist
-if(!file.exists(figures_pc_path)) {
-  dir.create(figures_pc_path, recursive = TRUE)
-}
+source(file = "../03_paths.R")
 
 # Sup1
 sup1_data <- "41467_2017_1460_MOESM4_ESM_clinical.xlsx"
@@ -83,6 +52,7 @@ maf_table <- read_excel(maf_path,
                         col_names = TRUE)
 
 ### Clean data
+# Response group definition
 sup1_response <- sup1_table %>%
   mutate(Patient.Response = case_when(
     RECIST %in% c("CR", "PR") ~ "R",
@@ -299,7 +269,6 @@ results_df <- tmp_merge %>%
     Is.Present == FALSE ~ "FAILED")
     ) %>% 
   dplyr::select(Sample.ID,
-                Type.of.Primary,
                 RNASeq.Data,
                 WES.Data)
 
@@ -324,9 +293,19 @@ datatable(results_df,
         )
 ```
   
+# Final clinical_df table
+
+```{r}
+final_clincal_data <- sup1_final %>% 
+  dplyr::left_join(results_df, by="Sample.ID")
+
+saveRDS(final_clincal_data, file = file.path(results_pc_path, "extended_clinical_data.rds"))
+```
+
 ## Characteristics plot
 
 ```{r, message=FALSE, warning=FALSE, fig.width=8, fig.height=6}
+# Fig1
 pat_df <- sup1_final %>%
   dplyr::rename(patient_response = Patient.Response,
                 sample_id = Sample.ID,

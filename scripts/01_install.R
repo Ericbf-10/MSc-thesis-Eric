@@ -4,115 +4,39 @@
 
 ## Install the required packages for the whole pipeline
 
-if (!require("readxl")) {
-  install.packages("readxl")
+# Check and install packages if not already installed
+install_if_missing <- function(package) {
+  if (!requireNamespace(package, quietly = TRUE)) {
+    install.packages(package)
+  }
 }
-if (!require("tidyverse")) {
-  install.packages("tidyverse")
-}
-if (!require("dplyr")) {
-  install.packages("dplyr")
-}
-if (!require("purrr")) {
-  install.packages("purrr")
-}
-if (!require("knitr")) {
-  install.packages("knitr")
-}
-if (!require("DT")) {
-  install.packages("DT")
-}
-if (!require("httr")) {
-  install.packages("httr")
-}
-if (!require("jsonlite")) {
-  install.packages("jsonlite")
-}
-if (!require("stringr")) {
-  install.packages("stringr")
-}
-if (!require("msigdbr")) {
-  install.packages("msigdbr")
-}
-if (!require("HGNChelper")) {
-  install.packages("HGNChelper")
-}
+
+# List of packages to check and install
+packages <- c("rprojroot", "readxl", "tidyverse", "dplyr", "purrr", "knitr", "DT", "httr", "jsonlite", "stringr", 
+              "msigdbr", "HGNChelper", "VennDiagram", "circlize", "gridtext", "patchwork", "ggpubr", 
+              "ggdendro", "reshape2", "ggnewscale", "cowplot", "pheatmap", "ggplotify", "ggrepel", 
+              "broom", "corrplot", "stats", "dendextend", "magrittr")
+
+# Iterate over the list and install missing packages
+lapply(packages, install_if_missing)
+
+# Specific check for BiocManager and Bioconductor packages
 if (!requireNamespace("BiocManager", quietly = TRUE)) {
   install.packages("BiocManager")
 }
-if (!requireNamespace("VennDiagram", quietly = TRUE)) {
-  install.packages("VennDiagram")
-}
-if (!requireNamespace("circlize", quietly = TRUE)) {
-  install.packages("circlize")
-}
-if (!requireNamespace("gridtext", quietly = TRUE)) {
-  install.packages("gridtext")
-}
-if (!requireNamespace("patchwork", quietly = TRUE)) {
-  install.packages("patchwork")
-}
-if (!requireNamespace("ggpubr", quietly = TRUE)) {
-  install.packages("ggpubr")
-}
-if (!requireNamespace("ggdendro", quietly = TRUE)) {
-  install.packages("ggdendro")
-}
-if (!("VariantAnnotation" %in% installed.packages())) {
-  # Install this package if it isn't installed yet
-  BiocManager::install("VariantAnnotation", update = FALSE)
-}
-if (!("biomaRt" %in% installed.packages())) {
-  # Install this package if it isn't installed yet
-  BiocManager::install("biomaRt", update = FALSE)
-}
-if (!("maftools" %in% installed.packages())) {
-  # Install this package if it isn't installed yet
-  BiocManager::install("maftools", update = FALSE)
-}
-if (!("GSEABase" %in% installed.packages())) {
-  # Install this package if it isn't installed yet
-  BiocManager::install("GSEABase", update = FALSE)
-}
-if (!("EnsDb.Hsapiens.v75" %in% installed.packages())) {
-  # Install this package if it isn't installed yet
-  BiocManager::install("EnsDb.Hsapiens.v75", update = FALSE) # GRCh37 from Ensembl
-}
-if (!("EnsDb.Hsapiens.v86" %in% installed.packages())) {
-  # Install this package if it isn't installed yet
-  BiocManager::install("EnsDb.Hsapiens.v86", update = FALSE) # GRCh37 from Ensembl
-}
-if (!("fgsea" %in% installed.packages())) {
-  # Install this package if it isn't installed yet
-  BiocManager::install("fgsea", update = FALSE)
-}
-if (!("limma" %in% installed.packages())) {
-  # Install this package if it isn't installed yet
-  BiocManager::install("limma", update = FALSE)
-}
-if (!("clusterProfiler" %in% installed.packages())) {
-  # Install this package if it isn't installed yet
-  BiocManager::install("clusterProfiler", update = FALSE)
-}
-if (!("ggupset" %in% installed.packages())) {
-  # Install this package if it isn't installed yet
-  BiocManager::install("ggupset", update = FALSE)
-}
-if (!("mygene" %in% installed.packages())) {
-  # Install this package if it isn't installed yet
-  BiocManager::install("mygene", update = FALSE)
-}
-if (!("GO.db" %in% installed.packages())) {
-  # Install this package if it isn't installed yet
-  BiocManager::install("GO.db", update = FALSE)
-}
-if (!("AnnotationDbi" %in% installed.packages())) {
-  # Install this package if it isn't installed yet
-  BiocManager::install("AnnotationDbi", update = FALSE)
-}
-if (!("ComplexHeatmap" %in% installed.packages())) {
-  # Install this package if it isn't installed yet
-  BiocManager::install("ComplexHeatmap", update = FALSE)
-}
-# install.packages("devtools")
-# devtools::install_github("jowatson2011/subcellularvis")
+
+# List of Bioconductor packages
+bioconductor_packages <- c("VariantAnnotation", "biomaRt", "maftools", "GSEABase", "EnsDb.Hsapiens.v75", 
+                           "EnsDb.Hsapiens.v86", "fgsea", "limma", "clusterProfiler", "ggupset", "mygene", 
+                           "GO.db", "AnnotationDbi", "ComplexHeatmap")
+
+# Iterate over the list and install missing Bioconductor packages
+lapply(bioconductor_packages, install_if_missing)
+
+# Load all packages
+all_packages <- c(packages, bioconductor_packages)
+
+# Load all packages using library()
+lapply(all_packages, function(pkg) {
+  library(pkg, character.only = TRUE)
+})
