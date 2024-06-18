@@ -27,10 +27,6 @@ figures_gor_path <- file.path(current_dir,
                               "./results/somatic_mutation_analysis/ora_exploration/figures")
 interesting_gs_path <- file.path(data_path,
                                  "../interesting_genesets.xlsx")
-results_ubi_ora_exp_path <- file.path(current_dir, 
-                                      "./results/somatic_mutation_analysis/ubi_ora_exploration/output")
-figures_ubi_ora_exp_path <- file.path(current_dir, 
-                                      "./results/somatic_mutation_analysis/ubi_ora_exploration/figures")
 results_ubi_db_path <- file.path(current_dir, 
                                  "./results/somatic_mutation_analysis/ubi_db_creation/output")
 figures_ubi_db_path <- file.path(current_dir, 
@@ -57,7 +53,7 @@ figures_expression_path <- file.path(current_dir,
 # List of paths
 paths <- c(
   data_path, results_pc_path, figures_pc_path, results_fip_path, figures_fip_path, 
-  results_gor_path, figures_gor_path, results_ubi_ora_exp_path, figures_ubi_ora_exp_path, 
+  results_gor_path, figures_gor_path,
   results_ubi_db_path, figures_ubi_db_path, results_ubfora_path, figures_ubfora_path, 
   results_protein_seqs_path, results_cellular_loc_path, figures_cellular_loc_path, 
   results_pfam_path, figures_pfam_path, results_expression_path, figures_expression_path

@@ -18,7 +18,7 @@ output:
 
 # Load data
 
-```{r, message=FALSE}
+```{r, message=FALSE, warning=FALSE}
 ### Load packages, functions and paths
 source(file = "../01_install.R")
 source(file = "../02_functions.R")
@@ -388,7 +388,7 @@ fora_results_nonsyn_csv_path <- file.path(results_gor_path, "fora_results_ubiqui
 fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_ubiquitin_lof.csv")
 
 # Load GMT file as a GeneSetCollection object
-gene_sets_collection <- getGmt(file.path(data_path, "genesets_ubiquitin.v2023.2.Hs.gmt"))
+gene_sets_collection <- getGmt(file.path(data_path, "../genesets_ubiquitin.v2023.2.Hs.gmt"))
 
 # Initialize an empty list to store the results
 gene_sets_list <- list()
@@ -519,7 +519,7 @@ fora_results_nonsyn_csv_path <- file.path(results_gor_path, "fora_results_keggme
 fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_keggmed_lof.csv")
 
 # Load GMT file as a GeneSetCollection object
-gene_sets_collection <- getGmt(file.path(data_path, "c2.cp.kegg_medicus.v2023.2.Hs.entrez.gmt"))
+gene_sets_collection <- getGmt(file.path(data_path, "../c2.cp.kegg_medicus.v2023.2.Hs.entrez.gmt"))
 
 # Initialize an empty list to store the results
 gene_sets_list <- list()
@@ -650,7 +650,7 @@ fora_results_nonsyn_csv_path <- file.path(results_gor_path, "fora_results_protea
 fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_proteasome_lof.csv")
 
 # Load GMT file as a GeneSetCollection object
-gene_sets_collection <- getGmt(file.path(data_path, "genesets_proteasome.v2023.2.Hs.gmt"))
+gene_sets_collection <- getGmt(file.path(data_path, "../genesets_proteasome.v2023.2.Hs.gmt"))
 
 # Initialize an empty list to store the results
 gene_sets_list <- list()
@@ -744,7 +744,7 @@ fora_results_nonsyn_csv_path <- file.path(results_gor_path, "fora_results_combin
 fora_results_lof_csv_path <- file.path(results_gor_path, "fora_results_combinedGS_lof.csv")
 
 # Load GMT file as a GeneSetCollection object
-gene_sets_collection <- getGmt(file.path(data_path, "genesets_combined.v2023.2.Hs.gmt"))
+gene_sets_collection <- getGmt(file.path(data_path, "../genesets_combined.v2023.2.Hs.gmt"))
 
 # Initialize an empty list to store the results
 gene_sets_list <- list()
@@ -877,7 +877,7 @@ fora_results_nonsyn_csv_path <- file.path(results_gor_path, "cP_fora_results_com
 fora_results_lof_csv_path <- file.path(results_gor_path, "cP_fora_results_combinedGS_lof.csv")
 
 # Load GMT file as a GeneSetCollection object
-gene_sets_collection <- getGmt(file.path(data_path, "genesets_combined.v2023.2.Hs.gmt"))
+gene_sets_collection <- getGmt(file.path(data_path, "../genesets_combined.v2023.2.Hs.gmt"))
 
 # Create an empty dataframe
 gene_sets_df <- tibble(gene_set_name = character(), gene_hs = character())

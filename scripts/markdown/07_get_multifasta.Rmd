@@ -21,31 +21,11 @@ output:
 
 This document is to get the protein sequences of the ubiquitin-related genes that have a LoF mutation from all the samples and create a multifasta file.
 
-```{r, message=FALSE}
+```{r, message=FALSE, warning=FALSE}
 ### Load packages, functions and paths
 source(file = "../01_install.R")
 source(file = "../02_functions.R")
 source(file = "../03_paths.R")
-
-### Define paths
-current_dir <- getwd()
-data_path <- file.path(current_dir,
-                       "../../data/_raw")
-results_pc_path <- file.path(current_dir,
-                              "../../results/patient_characteristics/output")
-results_fip_path <- file.path(current_dir,
-                              "../../results/somatic_mutation_analysis/functional_impact_prediction/output")
-results_ubi_db_path <- file.path(current_dir, 
-                                 "../../results/somatic_mutation_analysis/ubiquitin_custom_GS/output")
-results_ubfora_path <- file.path(current_dir, 
-                                 "../../results/somatic_mutation_analysis/ubiquitin_fora/output")
-results_protein_seqs_path <- file.path(current_dir, 
-                                 "../../results/somatic_mutation_analysis/protein_seqs/output")
-
-# Create the folder if it does not exist
-if(!file.exists(results_protein_seqs_path)) {
-  dir.create(results_protein_seqs_path, recursive = TRUE)
-}
 
 ### Read data & wrangle
 patients_ub_lof_mut_path <- file.path(results_ubfora_path, "annot_lof_ub.rds") # LoF patients mutations df

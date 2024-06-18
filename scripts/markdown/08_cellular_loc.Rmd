@@ -20,41 +20,11 @@ output:
 
 This document is to analyse the cellular location of the ubiquitin-related genes that have any LoF mutation among all samples and see if there is a pattern that distinguishes responders from non-responders.
 
-```{r, message=FALSE}
+```{r, message=FALSE, warning=FALSE}
 ### Load packages, functions and paths
 source(file = "../01_install.R")
 source(file = "../02_functions.R")
 source(file = "../03_paths.R")
-
-### Define paths
-current_dir <- getwd()
-data_path <- file.path(current_dir,
-                       "../../data/_raw")
-results_pc_path <- file.path(current_dir,
-                              "../../results/patient_characteristics/output")
-results_fip_path <- file.path(current_dir,
-                              "../../results/somatic_mutation_analysis/functional_impact_prediction/output")
-results_ubi_db_path <- file.path(current_dir, 
-                                 "../../results/somatic_mutation_analysis/ubiquitin_custom_GS/output")
-results_ubfora_path <- file.path(current_dir, 
-                                 "../../results/somatic_mutation_analysis/ubiquitin_fora/output")
-results_protein_seqs_path <- file.path(current_dir, 
-                                 "../../results/somatic_mutation_analysis/protein_seqs/output")
-results_cellular_loc_path <- file.path(current_dir, 
-                                 "../../results/somatic_mutation_analysis/cellular_loc/output")
-
-# Create the folder if it does not exist
-if(!file.exists(results_cellular_loc_path)) {
-  dir.create(results_cellular_loc_path, recursive = TRUE)
-}
-
-figures_cellular_loc_path <- file.path(current_dir, 
-                                 "../../results/somatic_mutation_analysis/cellular_loc/figures")
-
-# Create the folder if it does not exist
-if(!file.exists(figures_cellular_loc_path)) {
-  dir.create(figures_cellular_loc_path, recursive = TRUE)
-}
 
 ### Read data & wrangle
 # patients_ub_lof_mut_path <- file.path(results_ubfora_path, "lof_patients_ub_mutations.csv") # LoF patients mutations df
@@ -115,78 +85,8 @@ saveRDS(final_cell_loc_df, file = cell_loc_path)
 
 ```{r, fig.height=6, fig.width=8}
 # Fig11
-
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(ggpubr)
-
-# Sample data frame (replace with your actual data)
-# final_cell_loc_df <- your_data_frame_here
-
-# Count occurrences of each cell_loc per sample_id
-counts_df <- final_cell_loc_df %>%
-  group_by(sample_id, cell_loc) %>%
-  summarise(count = n(), .groups = 'drop')
-
-# Summarize by patient_response
-summary_df <- counts_df %>%
-  left_join(final_cell_loc_df %>% dplyr::select(sample_id, patient_response) %>% distinct(), by = "sample_id") %>%
-  group_by(patient_response, cell_loc) %>%
-  summarise(
-    total_count = sum(count),
-    std_dev = sd(count),
-    .groups = 'drop'
-  )
-
-# Calculate p-values using Wilcoxon test
-wilcox_results <- counts_df %>%
-  left_join(final_cell_loc_df %>% dplyr::select(sample_id, patient_response) %>% distinct(), by = "sample_id") %>%
-  group_by(cell_loc) %>%
-  summarise(
-    p_value = if (n_distinct(patient_response) == 2) 
-                wilcox.test(count ~ patient_response)$p.value 
-              else NA,
-    .groups = 'drop'
-  )
-
-# Combine summary statistics and p-values
-final_stats <- summary_df %>%
-  left_join(wilcox_results, by = "cell_loc") %>% 
-  dplyr::mutate(p_value_label = paste0("p = ", format(p_value, digits = 1)))
-
-# Calculate the maximum count to set the y-axis limit dynamically
-max_count <- max(final_stats$total_count, na.rm = TRUE)
-buffer <- max_count * 0.1 # Add 10% buffer to the maximum count for the labels
-
-# Plotting
-plot <- ggplot(final_stats, aes(x = cell_loc, y = total_count, fill = patient_response)) +
-  geom_bar(stat = "identity", position = position_dodge(), width = 0.8) +
-  geom_errorbar(aes(ymin = total_count - std_dev, ymax = total_count + std_dev), 
-                position = position_dodge(0.8), width = 0.25) +
-  scale_fill_manual(values = c("R" = "#009E73", "NR" = "#D55E00"),
-                    labels = c("R" = "Responders", "NR" = "Non-responders")) +
-  labs(title = NULL,
-       x = "Subcellular location",
-       y = "Protein counts",
-       fill = "Patient Response") +
-  ylim(0, max_count + buffer) + # Adjust the y-axis to include the buffer
-  theme_minimal() +
-  theme(
-      panel.grid.major = element_line(color = "lightgrey", linewidth = 0.5),
-      panel.grid.minor = element_blank(),
-      panel.background = element_rect(fill = "white", colour = "black"),
-      plot.background = element_rect(fill = "white", colour = NA),
-      axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +  # Rotate X-axis labels for better readability
-  scale_y_continuous(breaks = seq(0, max_count + 25, by = 10),  # Ticks every 5 units
-                     minor_breaks = seq(0, max_count + 25, by = 1))  # Minor ticks every 1 unit
-
-# Add the p-value text labels
-plot <- plot + geom_text(data = final_stats, aes(x = cell_loc, y = max_count + buffer / 2, label = p_value_label), 
-                         vjust = -1, hjust = 0.5, size = 4, color = "black")
-
 plot_path <- file.path(figures_cellular_loc_path, "cell_loc_barplot.png")
-ggsave(plot_path, plot, width = 8, height = 6, dpi = 300)
+plot <- barplot_mean_sd(final_cell_loc_df, "cell_loc", "Subcellular location", "Mean protein counts", 8, 6, -13.5, 4, plot_path)
 print(plot)
 ```
 

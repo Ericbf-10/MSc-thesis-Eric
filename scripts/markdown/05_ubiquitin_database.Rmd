@@ -18,35 +18,11 @@ output:
 
 # Load data
 
-```{r, message=FALSE}
+```{r, message=FALSE, warning=FALSE}
 ### Load packages, functions and paths
 source(file = "../01_install.R")
 source(file = "../02_functions.R")
 source(file = "../03_paths.R")
-
-### Define paths
-current_dir <- getwd()
-data_path <- file.path(current_dir,
-                       "../../data/_raw")
-results_pc_path <- file.path(current_dir,
-                              "../../results/patient_characteristics/output")
-results_fip_path <- file.path(current_dir,
-                              "../../results/somatic_mutation_analysis/functional_impact_prediction/output")
-results_ubi_db_path <- file.path(current_dir, 
-                                 "../../results/somatic_mutation_analysis/ubi_db_creation/output")
-
-# Create the folder if it does not exist
-if(!file.exists(results_ubi_db_path)) {
-  dir.create(results_ubi_db_path, recursive = TRUE)
-}
-
-figures_ubi_db_path <- file.path(current_dir, 
-                                 "../../results/somatic_mutation_analysis/ubi_db_creation/figures")
-
-# Create the folder if it does not exist
-if(!file.exists(figures_ubi_db_path)) {
-  dir.create(figures_ubi_db_path, recursive = TRUE)
-}
 
 maf_df_path <- file.path(results_fip_path, "all_mutations.csv") # All mutations df
 nonsyn_df_path <- file.path(results_fip_path, "nonsyn_mutations.csv") # Nonsyn mutations df
@@ -1289,7 +1265,7 @@ gene_sets_df <- gene_sets_df %>%
 gene_sets_list <- setNames(gene_sets_df$ensembl_id, gene_sets_df$go_parent_term)
 
 # Perform FORA analysis for Ubiquitin Gene Sets
-# perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, gene_sets_list=gene_sets_list)
+perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path, fora_results_nonsyn_csv_path, fora_results_lof_csv_path, gene_sets_list=gene_sets_list)
 
 # Load fora results
 fora_results_ubiquitin_all_df <- read.csv(fora_results_all_csv_path, header = TRUE)[ , -1]
@@ -1364,7 +1340,7 @@ gene_sets_df <- final_ub_db_df %>%
 gene_sets_list <- setNames(gene_sets_df$ensembl_id, gene_sets_df$category)
 
 # Perform FORA analysis for Ubiquitin Gene Sets
-# perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path2, fora_results_nonsyn_csv_path2, fora_results_lof_csv_path2, gene_sets_list=gene_sets_list)
+perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path2, fora_results_nonsyn_csv_path2, fora_results_lof_csv_path2, gene_sets_list=gene_sets_list)
 
 # Load fora results
 fora_results_ubiquitin_all_df2 <- read.csv(fora_results_all_csv_path2, header = TRUE)[ , -1]
@@ -1480,7 +1456,7 @@ gene_sets_df <- raw_go2ensembl_df %>%
 gene_sets_list <- setNames(gene_sets_df$ensembl_ids, gene_sets_df$go_parent_term)
 
 # Perform FORA analysis for Ubiquitin Gene Sets
-# perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path_mygene, fora_results_nonsyn_csv_path_mygene, fora_results_lof_csv_path_mygene, gene_sets_list=gene_sets_list)
+perform_fora_analysis(sample_id_list, list_of_all_ub_mutations, list_of_nonsyn_ub_mutations, list_of_lof_ub_mutations, fora_results_all_csv_path_mygene, fora_results_nonsyn_csv_path_mygene, fora_results_lof_csv_path_mygene, gene_sets_list=gene_sets_list)
 
 # Load fora results
 fora_results_ubiquitin_all_df_mygene <- read.csv(fora_results_all_csv_path_mygene, header = TRUE)[ , -1]

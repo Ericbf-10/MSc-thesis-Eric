@@ -16,7 +16,7 @@ output:
     number_sections: true
 ---
 
-```{r, message=FALSE}
+```{r, message=FALSE, warning=FALSE}
 ### Load packages, functions and paths
 source(file = "../01_install.R")
 source(file = "../02_functions.R")

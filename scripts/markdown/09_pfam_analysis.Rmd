@@ -20,43 +20,11 @@ output:
 
 This document is to analyse the PFAM of the ubiquitin-related genes that have any LoF mutation among all samples and see if there is a pattern that distinguishes responders from non-responders.
 
-```{r, message=FALSE}
+```{r, message=FALSE, warning=FALSE}
 ### Load packages, functions and paths
 source(file = "../01_install.R")
 source(file = "../02_functions.R")
 source(file = "../03_paths.R")
-
-### Define paths
-current_dir <- getwd()
-data_path <- file.path(current_dir,
-                       "../../data/_raw")
-results_pc_path <- file.path(current_dir,
-                              "../../results/patient_characteristics/output")
-results_fip_path <- file.path(current_dir,
-                              "../../results/somatic_mutation_analysis/functional_impact_prediction/output")
-results_ubi_db_path <- file.path(current_dir, 
-                                 "../../results/somatic_mutation_analysis/ubiquitin_custom_GS/output")
-results_ubfora_path <- file.path(current_dir, 
-                                 "../../results/somatic_mutation_analysis/ubiquitin_fora/output")
-results_protein_seqs_path <- file.path(current_dir, 
-                                 "../../results/somatic_mutation_analysis/protein_seqs/output")
-results_cellular_loc_path <- file.path(current_dir, 
-                                 "../../results/somatic_mutation_analysis/cellular_loc/output")
-results_pfam_path <- file.path(current_dir, 
-                                 "../../results/somatic_mutation_analysis/pfam_analysis/output")
-
-# Create the folder if it does not exist
-if(!file.exists(results_pfam_path)) {
-  dir.create(results_pfam_path, recursive = TRUE)
-}
-
-figures_pfam_path <- file.path(current_dir, 
-                                 "../../results/somatic_mutation_analysis/pfam_analysis/figures")
-
-# Create the folder if it does not exist
-if(!file.exists(figures_pfam_path)) {
-  dir.create(figures_pfam_path, recursive = TRUE)
-}
 
 ### Read data & wrangle
 # Sample info
@@ -66,7 +34,7 @@ patients_ub_prot_lof_mut_df <- read.csv(patients_ub_prot_lof_mut_path, header = 
 
 # Extract only Ensembl Gene and Prot IDs
 gene2prot_df <- patients_ub_prot_lof_mut_df %>% 
-  dplyr::select(sample_id, ensembl_id, p_ensembl_id)
+  dplyr::select(ensembl_id, p_ensembl_id)
 
 # Response info
 sup1_response_path <- file.path(results_pc_path, 
@@ -81,8 +49,8 @@ response_df <- sup1_response_df %>%
 
 # Source info
 unique_shared_genes_path <- file.path(results_ubfora_path, 
-                      "unique_and_shared_genes_RvsNR.csv")
-unique_shared_genes_df <- read.csv(unique_shared_genes_path, header = TRUE)[ , -1]
+                      "unique_and_shared_genes_RandNR.rds")
+unique_shared_genes_df <- readRDS(unique_shared_genes_path)
 
 # Wrangle
 gene2source_df <- unique_shared_genes_df %>% 
@@ -99,16 +67,16 @@ file_paths <- c(
 )
 
 # Use lapply to process each file and combine the results
-# all_data <- lapply(file_paths, extract_family_info)
+all_data <- lapply(file_paths, extract_family_info)
 
-# # Combine all data frames into one
-# pfam_df <- bind_rows(all_data)
-# rownames(pfam_df) <- NULL
+# Combine all data frames into one
+pfam_df <- bind_rows(all_data)
+rownames(pfam_df) <- NULL
 
 # Save to file
 all_pfam_path <- file.path(results_pfam_path, 
                       "all_pfam_data.rds")
-# saveRDS(pfam_df, file = all_pfam_path)
+saveRDS(pfam_df, file = all_pfam_path)
 
 pfam_df <- readRDS(all_pfam_path)
 
@@ -176,16 +144,12 @@ gene2pfam_df <- standard_dom_pfam_df %>%
 
 combined_df <- gene2pfam_df %>% 
   dplyr::left_join(gene2source_df, by = "ensembl_id") %>% 
-  dplyr::select(sample_id, corrected_hugo_symbol, dom_name, source) %>% 
+  dplyr::select(sample_id, corrected_hugo_symbol, dom_name, source, patient_response) %>% 
   dplyr::distinct() %>% 
   tidyr::drop_na()
 
 # Remove p_ensembl_id col
-combined_df <- combined_df[, !names(combined_df) %in% "p_ensembl_id"]
-
-# Merge response info
-final_pfam_df <- combined_df %>% 
-  dplyr::left_join(response_df)
+final_pfam_df <- combined_df[, !names(combined_df) %in% "p_ensembl_id"]
 ```
 
 I grouped some PFAM predicted domains manually because they had slightly different names but performed the same function.
@@ -203,82 +167,10 @@ I grouped some PFAM predicted domains manually because they had slightly differe
 
 # Barplot of PFAM
 
-```{r, fig.height=10, fig.width=14}
+```{r, fig.height=4, fig.width=10}
 # Fig12
-
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(ggpubr)
-
-# Count occurrences of each dom_name per sample_id
-counts_df <- final_pfam_df %>%
-  group_by(sample_id, dom_name) %>%
-  summarise(count = n(), .groups = 'drop')
-
-# Summarize by patient_response
-summary_df <- counts_df %>%
-  left_join(final_pfam_df %>% dplyr::select(sample_id, patient_response) %>% distinct(), by = "sample_id") %>%
-  group_by(patient_response, dom_name) %>%
-  summarise(
-    total_count = sum(count),
-    std_dev = sd(count),
-    .groups = 'drop'
-  )
-
-# Calculate p-values using Wilcoxon test
-wilcox_results <- counts_df %>%
-  left_join(final_pfam_df %>% dplyr::select(sample_id, patient_response) %>% distinct(), by = "sample_id") %>%
-  group_by(dom_name) %>%
-  summarise(
-    p_value = if (n_distinct(patient_response) == 2) 
-                wilcox.test(count ~ patient_response)$p.value 
-              else NA,
-    .groups = 'drop'
-  ) %>%
-  mutate(p_value = ifelse(is.nan(p_value), NA, p_value))
-
-# Combine summary statistics and p-values
-final_stats <- summary_df %>%
-  left_join(wilcox_results, by = "dom_name") %>% 
-  mutate(p_value_label = case_when(
-    is.na(p_value) ~ NA_character_,
-    TRUE ~ paste0("p=", format(p_value, digits = 2))
-  ))
-
-# Calculate the maximum count to set the y-axis limit dynamically
-max_count <- max(final_stats$total_count, na.rm = TRUE)
-buffer <- max_count * 0.1 # Add 10% buffer to the maximum count for the labels
-
-# Plotting
-plot <- ggplot(final_stats, aes(x = dom_name, y = total_count, fill = patient_response)) +
-  geom_bar(stat = "identity", position = position_dodge(), width = 0.8) +
-  geom_errorbar(aes(ymin = total_count - std_dev, ymax = total_count + std_dev), 
-                position = position_dodge(0.8), width = 0.25) +
-  scale_fill_manual(values = c("R" = "#009E73", "NR" = "#D55E00"),
-                    labels = c("R" = "Responders", "NR" = "Non-responders")) +
-  labs(title = NULL,
-       x = "PFAM family",
-       y = "Protein counts",
-       fill = "Patient Response") +
-  ylim(0, max_count + buffer) + # Adjust the y-axis to include the buffer
-  theme_minimal() +
-  theme(
-      panel.grid.major = element_line(color = "lightgrey", linewidth = 0.5),
-      panel.grid.minor = element_blank(),
-      panel.background = element_rect(fill = "white", colour = "black"),
-      plot.background = element_rect(fill = "white", colour = NA),
-      axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +  # Rotate X-axis labels for better readability
-  scale_y_continuous(breaks = seq(0, max_count + 25, by = 5),  # Ticks every 5 units
-                     minor_breaks = seq(0, max_count + 25, by = 1))  # Minor ticks every 1 unit
-
-# Add the p-value text labels
-plot <- plot + geom_text(data = final_stats, aes(x = dom_name, y = max_count + buffer / 2, label = p_value_label), 
-                         vjust = -2.5, hjust = 0.5, size = 4, color = "black")
-
-# plot <- plot + stat_compare_means(aes(group = dom_name), method = "wilcox.test", label = "p.format", vjust = 0,                                   ref.group = ".all.", label.y = 195)
 plot_path <- file.path(figures_pfam_path, "pfam_barplot.png")
-ggsave(plot_path, plot, width = 14, height = 10, dpi = 300)
+plot <- barplot_mean_sd(final_pfam_df, "dom_name", "PFAM family", "Mean protein counts", 10, 4, -10.1, 3, plot_path)
 print(plot)
 ```
 

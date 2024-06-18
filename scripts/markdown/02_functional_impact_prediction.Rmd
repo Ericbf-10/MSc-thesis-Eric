@@ -277,7 +277,8 @@ write.csv(lof_vep_df, file = lof_vep_out_path, row.names = TRUE)
 
 lof_vep_df_reduced <- lof_vep_df %>% 
   dplyr::rename(hugo_symbol = SYMBOL) %>% 
-  dplyr::select(sample_id, ensembl_id, entrez_id, hugo_symbol, Location, Allele, Liberal_consequence)
+  dplyr::select(sample_id, ensembl_id, entrez_id, hugo_symbol, Location, Allele, Liberal_consequence) %>% 
+  dplyr::distinct()
   
 # Save the lof_vep_df_reduced into a file
 lof_vep_reduced_out_path <- file.path(results_fip_path, 
@@ -690,8 +691,44 @@ getClinicalData(mm909)
 ## Shows all fields in MAF
 getFields(mm909)
 
+## Shows clinical enrichment
+clinicalEnrichment(mm909, "Patient_Response")
+
 ## Writes maf summary to an output file with basename mm909
 write.mafSummary(maf = mm909, basename = file.path(results_fip_path, 'mm909'))
+```
+### Count SNP, DNP, Missense, Nonsense, Splice, Nonstop
+
+```{r}
+maf_df_annotated %>% 
+  dplyr::filter(Variant_Type == "SNP") %>% 
+  dplyr::count() %>% 
+  dplyr::rename(SNP = n)
+
+maf_df_annotated %>% 
+  dplyr::filter(Variant_Type == "DNP") %>% 
+  dplyr::count() %>% 
+  dplyr::rename(DNP = n)
+
+maf_df_annotated %>% 
+  dplyr::filter(Variant_Classification == "Missense_Mutation") %>% 
+  dplyr::count() %>% 
+  dplyr::rename(Missense_Mutation = n)
+
+maf_df_annotated %>% 
+  dplyr::filter(Variant_Classification == "Nonsense_Mutation") %>% 
+  dplyr::count() %>% 
+  dplyr::rename(Nonsense_Mutation = n)
+
+maf_df_annotated %>% 
+  dplyr::filter(Variant_Classification == "Splice_Site") %>% 
+  dplyr::count() %>% 
+  dplyr::rename(Splice_Site = n)
+
+maf_df_annotated %>% 
+  dplyr::filter(Variant_Classification == "Nonstop_Mutation") %>% 
+  dplyr::count() %>% 
+  dplyr::rename(Nonstop_Mutation = n)
 ```
 
 ### Visualization
@@ -805,6 +842,9 @@ getClinicalData(mm909)
 
 ## Shows all fields in MAF
 getFields(mm909)
+
+## Shows clinical enrichment
+clinicalEnrichment(mm909, "Patient_Response")
 
 ## Writes maf summary to an output file with basename mm909
 write.mafSummary(maf = mm909, basename = file.path(results_fip_path, 'mm909_lof'))
