@@ -234,7 +234,7 @@ corrected_hsymbols_updated <- corrected_hsymbols_updated %>%
 new_genes <- corrected_hsymbols_updated %>%
   dplyr::filter(category == "C19_genes") %>%
   dplyr::anti_join(corrected_hsymbols_updated %>%
-              filter(category == "dub_genes"),
+              dplyr::filter(category == "dub_genes"),
             by = "corrected_hugo_symbol")
 
 ## Update the category to dub_genes for these new genes
@@ -1124,7 +1124,7 @@ saveRDS(final_go_df, file = unique_shared_genes_path)
 ```{r, warning=FALSE, message=FALSE, fig.width=13, fig.height=6}
 # Fig10
 plot_path <- file.path(figures_ubfora_path, "go_terms_barplot.png")
-plot <- barplot_mean_sd(final_go_df, "go_parent_term", "GO Term", "Mean gene counts", 13, 6, -14.5, 3, plot_path)
+plot <- barplot_mean_sd(final_go_df, "go_parent_term", "GO Term", "Mean gene counts", 13, 6, -14.5, 0.5, 3, plot_path)
 print(plot)
 ```
 

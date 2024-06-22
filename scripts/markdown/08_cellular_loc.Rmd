@@ -86,7 +86,7 @@ saveRDS(final_cell_loc_df, file = cell_loc_path)
 ```{r, fig.height=6, fig.width=8}
 # Fig11
 plot_path <- file.path(figures_cellular_loc_path, "cell_loc_barplot.png")
-plot <- barplot_mean_sd(final_cell_loc_df, "cell_loc", "Subcellular location", "Mean protein counts", 8, 6, -13.5, 4, plot_path)
+plot <- barplot_mean_sd(final_cell_loc_df, "cell_loc", "Subcellular location", "Mean protein counts", 8, 6, -13.5, 0.5, 4, plot_path)
 print(plot)
 ```
 

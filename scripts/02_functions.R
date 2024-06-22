@@ -1685,19 +1685,26 @@ pheatmap_biomarkers <- function(df, numerical_biomarkers, categorical_biomarkers
 }
 
 
-barplot_mean_sd <- function(df, var_term, x_label, y_label, width, height, vjust, size, plot_path) {
+barplot_mean_sd <- function(df, var_term, x_label, y_label, width, height, vjust, hjust, size, plot_path) {
+  
+  # Create all possible pairs of sample_id and var_term
+  all_pairs <- expand.grid(sample_id = unique(df$sample_id), 
+                           var_value = unique(df[[var_term]]))
+  colnames(all_pairs)[2] <- var_term
   
   # Count occurrences of each var_term per sample_id
   counts_df <- df %>%
-    group_by(sample_id, !!sym(var_term)) %>%
-    summarise(count = n(), .groups = 'drop')
+    dplyr::group_by(sample_id, !!sym(var_term)) %>%
+    dplyr::summarise(count = n(), .groups = 'drop') %>%
+    dplyr::right_join(all_pairs, by = c("sample_id", var_term)) %>%
+    dplyr::mutate(count = ifelse(is.na(count), 0, count))
   
   # Get the number of samples for each patient_response category
   sample_counts <- df %>%
     dplyr::select(sample_id, patient_response) %>%
-    distinct() %>%
-    group_by(patient_response) %>%
-    summarise(sample_count = n(), .groups = 'drop')
+    dplyr::distinct() %>%
+    dplyr::group_by(patient_response) %>%
+    dplyr::summarise(sample_count = n(), .groups = 'drop')
   
   # Summarize by patient_response to calculate the mean and standard deviation
   summary_df <- counts_df %>%
@@ -1725,10 +1732,11 @@ barplot_mean_sd <- function(df, var_term, x_label, y_label, width, height, vjust
   
   # Combine summary statistics and p-values
   final_stats <- summary_df %>%
-    left_join(wilcox_results, by = var_term) %>% 
-    mutate(p_value_label = case_when(
+    dplyr::left_join(wilcox_results, by = var_term) %>% 
+    dplyr::mutate(p_value_label = case_when(
       is.na(p_value) ~ NA_character_,
-      TRUE ~ paste0("p=", format(p_value, digits = 2))
+      p_value < 0.05 ~ paste0("p=", format(p_value, digits = 2)),
+      TRUE ~ NA_character_
     ))
   
   # Calculate the maximum mean count to set the y-axis limit dynamically
@@ -1759,7 +1767,7 @@ barplot_mean_sd <- function(df, var_term, x_label, y_label, width, height, vjust
   
   # Add the p-value text labels
   plot <- plot + geom_text(data = final_stats, aes(x = !!sym(var_term), y = max_mean_count + buffer / 2, label = p_value_label), 
-                           vjust = vjust, hjust = 0.5, size = size, color = "black")
+                             vjust = vjust, hjust = hjust, size = size, color = "black")
   
   ggsave(plot_path, plot, width = width, height = height, dpi = 300)
   return(plot)
