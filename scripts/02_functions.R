@@ -1706,9 +1706,13 @@ barplot_mean_sd <- function(df, var_term, x_label, y_label, width, height, vjust
     dplyr::group_by(patient_response) %>%
     dplyr::summarise(sample_count = n(), .groups = 'drop')
   
+  # Normalize counts by total number of mutations in each response group
+  counts_df <- counts_df %>%
+    left_join(df %>% dplyr::select(sample_id, patient_response) %>% distinct(), by = "sample_id") %>%
+    mutate(count = ifelse(patient_response == "R", count / 87, count / 43))
+  
   # Summarize by patient_response to calculate the mean and standard deviation
   summary_df <- counts_df %>%
-    left_join(df %>% dplyr::select(sample_id, patient_response) %>% distinct(), by = "sample_id") %>%
     group_by(patient_response, !!sym(var_term)) %>%
     summarise(
       total_count = sum(count),
@@ -1720,7 +1724,6 @@ barplot_mean_sd <- function(df, var_term, x_label, y_label, width, height, vjust
   
   # Calculate p-values using Wilcoxon test
   wilcox_results <- counts_df %>%
-    left_join(df %>% dplyr::select(sample_id, patient_response) %>% distinct(), by = "sample_id") %>%
     group_by(!!sym(var_term)) %>%
     summarise(
       p_value = if (n_distinct(patient_response) == 2) 
@@ -1762,8 +1765,8 @@ barplot_mean_sd <- function(df, var_term, x_label, y_label, width, height, vjust
       panel.background = element_rect(fill = "white", colour = "black"),
       plot.background = element_rect(fill = "white", colour = NA),
       axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +  # Rotate X-axis labels for better readability
-    scale_y_continuous(breaks = seq(0, max_mean_count + 25, by = 1),  # Ticks every unit
-                       minor_breaks = seq(0, max_mean_count + 25, by = 1))  # Minor ticks every 1 unit
+    scale_y_continuous(breaks = seq(0, max_mean_count + 25, by = 0.1),  # Ticks every unit
+                       minor_breaks = seq(0, max_mean_count + 25, by = 0.1))  # Minor ticks every 1 unit
   
   # Add the p-value text labels
   plot <- plot + geom_text(data = final_stats, aes(x = !!sym(var_term), y = max_mean_count + buffer / 2, label = p_value_label), 

@@ -735,7 +735,7 @@ ensembl_ids_all_na_category <- annot_ub_glist_df %>%
   dplyr::pull(ensembl_id)
 
 final_df_filtered_all_na <- annot_ub_glist_df %>%
-  filter(ensembl_id %in% ensembl_ids_all_na_category)
+  dplyr::filter(ensembl_id %in% ensembl_ids_all_na_category)
 
 # ensembl_ids_with_non_na_category <- annot_ub_glist_df %>%
 #   dplyr::group_by(ensembl_id) %>%
@@ -1074,7 +1074,7 @@ ensembl_ids_all_na_category3 <- annot_ub_glist_df3 %>%
   dplyr::pull(ensembl_id)
 
 final_df_filtered_all_na3 <- annot_ub_glist_df3 %>%
-  filter(ensembl_id %in% ensembl_ids_all_na_category3)
+  dplyr::filter(ensembl_id %in% ensembl_ids_all_na_category3)
   
 # Here I lose 2 genes because no parent was found. The only parent found is "biological_process", which is too generic.
 lost_genes5 <- final_df_filtered_all_na3 %>% 
